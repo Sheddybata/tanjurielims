@@ -9,6 +9,7 @@ type CreateUserBody = {
   fullName: string;
   role: UiRole;
   departmentId?: string | null;
+  subsidiaryId?: string | null;
 };
 
 export async function POST(request: NextRequest) {
@@ -41,8 +42,8 @@ export async function POST(request: NextRequest) {
       .eq("id", userData.user.id)
       .maybeSingle();
 
-    if (profileError || !profile?.is_active || !["chairman", "general_manager"].includes(profile.role)) {
-      return NextResponse.json({ error: "Only Chairman or General Manager can create users" }, { status: 403 });
+    if (profileError || !profile?.is_active || !["chairman", "general_manager", "director_of_administration"].includes(profile.role)) {
+      return NextResponse.json({ error: "Only the Chairman, General Manager, or Director of Administration can create users" }, { status: 403 });
     }
 
     const body = (await request.json()) as CreateUserBody;
@@ -50,8 +51,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "email, password, fullName, and role are required" }, { status: 400 });
     }
 
-    if (body.role === "department-head" && !body.departmentId) {
-      return NextResponse.json({ error: "departmentId is required for Department Head" }, { status: 400 });
+    if ((body.role === "department-head" || body.role === "manager") && !body.departmentId) {
+      return NextResponse.json({ error: "departmentId is required for a manager or unit head" }, { status: 400 });
+    }
+
+    if (body.role === "executive-director" && !body.subsidiaryId) {
+      return NextResponse.json({ error: "subsidiaryId is required for an executive director" }, { status: 400 });
     }
 
     const admin = getSupabaseAdmin();
@@ -66,17 +71,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: createError?.message || "Failed to create auth user" }, { status: 400 });
     }
 
-    const { error: insertError } = await admin.from("profiles").insert({
+    const profileRow: Record<string, unknown> = {
       id: created.user.id,
       full_name: body.fullName,
       role: roleToDb[body.role],
-      department_id: body.role === "department-head" ? body.departmentId : null,
+      department_id: body.role === "department-head" || body.role === "manager" ? body.departmentId : null,
+      subsidiary_id: body.role === "executive-director" ? body.subsidiaryId : null,
       is_active: true
-    });
+    };
+    let { error: insertError } = await admin.from("profiles").insert(profileRow);
+    if (insertError?.message.includes("subsidiary_id")) {
+      delete profileRow.subsidiary_id;
+      ({ error: insertError } = await admin.from("profiles").insert(profileRow));
+    }
 
     if (insertError) {
       await admin.auth.admin.deleteUser(created.user.id);
-      return NextResponse.json({ error: insertError.message }, { status: 400 });
+      const message = insertError.message.includes("invalid input value for enum ims_role")
+        ? "The new roles are not in the database yet. In Supabase, open SQL Editor, run only the file supabase/migrations/202610010001_people_roles.sql, wait until it succeeds, then create this account again."
+        : insertError.message;
+      return NextResponse.json({ error: message }, { status: 400 });
     }
 
     return NextResponse.json({

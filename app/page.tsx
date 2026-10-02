@@ -15,20 +15,26 @@ import {
   getSessionUser,
   profileToSession,
   signInWithPassword,
-  signOut
+  signOut,
+  type DepartmentRow
 } from "@/lib/ims/data";
+import { groupBySubsidiary, SubsidiaryDepartmentFields } from "@/app/components/org-select";
 import { applyReportDecision, createAsset, createDailyReport, createMarketingLead } from "@/lib/ims/writes";
+import { PeopleOffice } from "@/app/components/people-office";
+import { AdminDashboard } from "@/app/components/admin-dashboard";
+import { KpiOffice } from "@/app/components/kpi-office";
 
-type Role = "chairman" | "general-manager" | "department-head" | "marketing-officer";
-type Department =
-  | "Corporate Administration"
-  | "Microcredit & Thrift"
-  | "Renewable Energy"
-  | "ICT"
-  | "Printing"
-  | "Media"
-  | "Real Estate"
-  | "Logistics";
+type Role =
+  | "chairman"
+  | "managing-director"
+  | "executive-director"
+  | "general-manager"
+  | "director-of-administration"
+  | "human-resources"
+  | "department-head"
+  | "manager"
+  | "marketing-officer";
+type Department = string;
 type SubmissionStatus = "Draft" | "Pending Chairman Review" | "Approved" | "Returned";
 type Tone = "blue" | "green" | "amber" | "red" | "slate";
 type PageId =
@@ -47,7 +53,12 @@ type PageId =
   | "Client Visits"
   | "Proposals"
   | "Quotations"
-  | "Lead Assignment";
+  | "Lead Assignment"
+  | "Staff Register"
+  | "Leave"
+  | "Letters"
+  | "Admin Dashboard"
+  | "Directorate KPIs";
 
 type Session = {
   role: Role;
@@ -61,6 +72,8 @@ type DepartmentSubmission = {
   id: string;
   dbId?: string;
   department: Department;
+  departmentId?: string;
+  subsidiary?: string;
   submittedBy: string;
   date: string;
   revenue: number;
@@ -81,12 +94,14 @@ type DepartmentSubmission = {
   summary: string;
   status: SubmissionStatus;
   priority: "Normal" | "Attention" | "Critical";
+  parentReportId?: string | null;
 };
 
 type ApprovalAction = {
   id: string;
   reportId: string;
   department: Department;
+  subsidiary?: string;
   actor: string;
   action: Exclude<SubmissionStatus, "Draft">;
   previousStatus: SubmissionStatus;
@@ -179,11 +194,25 @@ type AssetRecord = {
 };
 
 const roleLabels: Record<Role, string> = {
-  chairman: "Chairman",
+  chairman: "Board Chairman",
+  "managing-director": "Managing Director",
+  "executive-director": "Executive Director",
   "general-manager": "General Manager",
-  "department-head": "Department Head",
+  "director-of-administration": "Director of Administration",
+  "human-resources": "Central Human Resources",
+  "department-head": "Unit head",
+  manager: "Manager",
   "marketing-officer": "Business Development & Marketing Officer"
 };
+
+function writesDepartmentReports(role: Role) {
+  return role === "department-head" || role === "manager";
+}
+
+function placeLabel(department?: string, subsidiary?: string) {
+  if (subsidiary && department) return `${subsidiary} · ${department}`;
+  return department || "";
+}
 
 const departments: Department[] = [
   "Corporate Administration",
@@ -198,18 +227,24 @@ const departments: Department[] = [
 
 
 const rolePages: Record<Role, PageId[]> = {
-  chairman: ["Executive Dashboard", "Approval Queue", "Department Reports", "Assets", "Users"],
-  "general-manager": ["Operations Overview", "Department Compliance", "Exceptions", "Marketing Pipeline", "Assets", "Users"],
-  "department-head": ["Daily Submission", "My Reports", "Returned Items"],
+  chairman: ["Executive Dashboard", "Approval Queue", "Department Reports", "Staff Register", "Leave", "Letters", "Assets", "Users"],
+  "managing-director": ["Staff Register", "Leave", "Letters"],
+  "executive-director": ["Leave", "Directorate KPIs", "Staff Register"],
+  "general-manager": ["Operations Overview", "Department Compliance", "Exceptions", "Marketing Pipeline", "Staff Register", "Assets", "Users"],
+  "director-of-administration": ["Admin Dashboard", "Directorate KPIs", "Staff Register", "Leave", "Letters", "Users"],
+  "human-resources": ["Staff Register", "Leave", "Letters"],
+  "department-head": ["Daily Submission", "My Reports", "Returned Items", "Directorate KPIs"],
+  manager: ["Daily Submission", "My Reports", "Returned Items", "Directorate KPIs"],
   "marketing-officer": ["Client Visits", "Proposals", "Quotations", "Lead Assignment"]
 };
 
-const mobileFieldRoles: Role[] = ["department-head", "marketing-officer"];
+const mobileFieldRoles: Role[] = ["department-head", "manager", "marketing-officer"];
 
 const mobileNavLabels: Partial<Record<PageId, string>> = {
   "Daily Submission": "Submit",
   "My Reports": "Reports",
   "Returned Items": "Returned",
+  "Directorate KPIs": "KPIs",
   "Client Visits": "Visits",
   Proposals: "Proposals",
   Quotations: "Quotes",
@@ -456,11 +491,12 @@ export default function Home() {
   const [leads, setLeads] = useState<MarketingLead[]>([]);
   const [assetRows, setAssetRows] = useState<AssetRecord[]>([]);
   const [dbNotifications, setDbNotifications] = useState<ImsNotification[]>([]);
-  const [departmentRows, setDepartmentRows] = useState<Array<{ id: string; name: string }>>([]);
+  const [departmentRows, setDepartmentRows] = useState<DepartmentRow[]>([]);
   const [busyMessage, setBusyMessage] = useState("");
   const [summaryData, setSummaryData] = useState<ExecutiveSummaryData | null>(null);
   const [showSummaryPreview, setShowSummaryPreview] = useState(false);
   const [activePage, setActivePage] = useState<PageId>("Executive Dashboard");
+  const [selectedSubsidiary, setSelectedSubsidiary] = useState<string>("All");
   const [selectedDepartment, setSelectedDepartment] = useState<Department | "All">("All");
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [returnTargetId, setReturnTargetId] = useState<string | null>(null);
@@ -569,9 +605,9 @@ export default function Home() {
     ? submissions.find((submission) => submission.id === returnTargetId)
     : undefined;
   const canReceiveNotifications =
-    session?.role === "department-head" || session?.role === "general-manager";
+    writesDepartmentReports(session?.role ?? "chairman") || session?.role === "general-manager";
   const sessionNotifications =
-    session?.role === "department-head" && session.department
+    session && writesDepartmentReports(session.role) && session.department
       ? notifications.filter((notification) => notification.department === session.department)
       : session?.role === "general-manager"
         ? notifications
@@ -608,7 +644,11 @@ export default function Home() {
   }
 
   function departmentIdByName(name: string) {
-    return departmentRows.find((item) => item.name === name)?.id;
+    return (
+      departmentRows.find((item) => item.id === name)?.id ??
+      departmentRows.find((item) => item.name === name)?.id ??
+      departmentRows.find((item) => placeLabel(item.name, item.subsidiaryName ?? undefined) === name)?.id
+    );
   }
 
   async function updateSubmissionStatus(id: string, status: Exclude<SubmissionStatus, "Draft">, comment?: string) {
@@ -665,7 +705,8 @@ export default function Home() {
         upcomingProjects: submission.upcomingProjects,
         growthIdeas: submission.growthIdeas,
         challenges: submission.challenges,
-        summary: submission.summary
+        summary: submission.summary,
+        parentReportId: submission.parentReportId ?? null
       });
       await refreshImsData();
       return created;
@@ -853,6 +894,7 @@ export default function Home() {
         <section className="min-w-0 flex-1 overflow-x-hidden">
           <Topbar
             session={session}
+            pageTitle={activePage}
             compact={fieldMobile}
             showNotifications={canReceiveNotifications}
             notificationCount={sessionNotifications.filter((notification) => !notification.read).length}
@@ -888,17 +930,26 @@ export default function Home() {
                 }}
                 onReturnRequest={requestReportReturn}
                 onReportOpen={setSelectedReportId}
-                onDepartmentSelect={(department) => {
-                  setSelectedDepartment(department);
+                onDepartmentSelect={(departmentId) => {
+                  const row = departmentRows.find((item) => item.id === departmentId);
+                  setSelectedSubsidiary(row?.subsidiaryName || "All");
+                  setSelectedDepartment(row?.name ?? "All");
                   setActivePage("Approval Queue");
                 }}
+                departmentRows={departmentRows}
               />
             )}
             {session.role === "chairman" && activePage === "Approval Queue" && (
               <ChairmanApprovalPage
                 submissions={submissions}
                 approvalActions={approvalActions}
+                departmentRows={departmentRows}
+                selectedSubsidiary={selectedSubsidiary}
                 selectedDepartment={selectedDepartment}
+                onSelectedSubsidiaryChange={(value) => {
+                  setSelectedSubsidiary(value);
+                  setSelectedDepartment("All");
+                }}
                 onSelectedDepartmentChange={setSelectedDepartment}
                 onStatusChange={async (id, status) => {
                   try {
@@ -912,17 +963,18 @@ export default function Home() {
               />
             )}
             {session.role === "chairman" && activePage === "Department Reports" && (
-              <DepartmentReportsPage submissions={submissions} approvalActions={approvalActions} onReportOpen={setSelectedReportId} />
+              <DepartmentReportsPage submissions={submissions} approvalActions={approvalActions} departmentRows={departmentRows} onReportOpen={setSelectedReportId} />
             )}
             {(session.role === "chairman" || session.role === "general-manager") && activePage === "Assets" && (
               <AssetsPage assets={assetRows} departments={departmentRows} onCreate={addAssetRecord} />
             )}
-            {(session.role === "chairman" || session.role === "general-manager") && activePage === "Users" && (
+            {(session.role === "chairman" || session.role === "general-manager" || session.role === "director-of-administration") && activePage === "Users" && (
               <UsersPage />
             )}
             {session.role === "general-manager" &&
               activePage !== "Users" &&
-              activePage !== "Assets" && (
+              activePage !== "Assets" &&
+              activePage !== "Staff Register" && (
               <GeneralManagerDashboard
                 activePage={activePage}
                 submissions={submissions}
@@ -938,19 +990,41 @@ export default function Home() {
                   }
                 }}
                 onReturnRequest={requestReportReturn}
+                departmentRows={departmentRows}
               />
             )}
-            {session.role === "department-head" && (
+            {writesDepartmentReports(session.role) && (
               <DepartmentHeadPortal
                 activePage={activePage}
                 session={session}
                 submissions={submissions}
                 onSubmit={addSubmission}
                 onReportOpen={setSelectedReportId}
+                onPageChange={goToPage}
               />
             )}
             {session.role === "marketing-officer" && (
-              <MarketingPortal activePage={activePage} leads={leads} onSubmit={addLead} />
+              <MarketingPortal activePage={activePage} leads={leads} departments={departmentRows} onSubmit={addLead} />
+            )}
+            {session.role === "director-of-administration" && activePage === "Admin Dashboard" && (
+              <AdminDashboard
+                reports={submissions}
+                onOpen={setActivePage}
+              />
+            )}
+            {activePage === "Directorate KPIs" && (
+              <KpiOffice
+                canSetTarget={session.role === "director-of-administration"}
+                departmentId={session.departmentId}
+              />
+            )}
+            {(activePage === "Staff Register" || activePage === "Leave" || activePage === "Letters") && (
+              <PeopleOffice
+                page={activePage}
+                role={session.role}
+                canWritePeople={session.role === "director-of-administration" || session.role === "human-resources"}
+                canApproveLeave={session.role === "executive-director" || session.role === "director-of-administration"}
+              />
             )}
           </div>
         </section>
@@ -960,6 +1034,13 @@ export default function Home() {
           session={session}
           activePage={activePage}
           onPageChange={goToPage}
+          badges={{
+            "Returned Items": submissions.filter(
+              (item) =>
+                (session.departmentId ? item.departmentId === session.departmentId : item.department === session.department) &&
+                item.status === "Returned"
+            ).length
+          }}
         />
       )}
       {showNotifications && canReceiveNotifications && (
@@ -1229,32 +1310,41 @@ function Sidebar({
 function MobileFieldNav({
   session,
   activePage,
-  onPageChange
+  onPageChange,
+  badges
 }: {
   session: Session;
   activePage: PageId;
   onPageChange: (page: PageId) => void;
+  badges?: Partial<Record<PageId, number>>;
 }) {
   const items = rolePages[session.role];
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pt-2 backdrop-blur lg:hidden"
+    <nav
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pt-2 backdrop-blur lg:hidden"
       style={{ paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))" }}
     >
       <div className="mx-auto grid max-w-lg" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
         {items.map((item) => {
           const active = activePage === item;
+          const badge = badges?.[item] ?? 0;
           return (
             <button
               key={item}
               onClick={() => onPageChange(item)}
               className={cx(
-                "flex min-h-14 flex-col items-center justify-center rounded-xl px-1 py-2 text-center transition",
+                "relative flex min-h-14 flex-col items-center justify-center rounded-xl px-1 py-2 text-center transition",
                 active ? "bg-blue-50 text-blue-900" : "text-slate-500"
               )}
             >
               <span className={cx("text-[13px] font-semibold leading-tight", active && "text-blue-900")}>
                 {mobileNavLabels[item] ?? item}
               </span>
+              {badge > 0 && (
+                <span className="absolute right-2 top-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  {badge > 9 ? "9+" : badge}
+                </span>
+              )}
             </button>
           );
         })}
@@ -1265,6 +1355,7 @@ function MobileFieldNav({
 
 function Topbar({
   session,
+  pageTitle,
   compact,
   showNotifications,
   notificationCount,
@@ -1272,6 +1363,7 @@ function Topbar({
   onLogout
 }: {
   session: Session;
+  pageTitle?: PageId;
   compact?: boolean;
   showNotifications: boolean;
   notificationCount: number;
@@ -1289,7 +1381,7 @@ function Topbar({
         <div className="min-w-0">
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
             {roleLabels[session.role]}
-            {session.department ? ` Â· ${session.department}` : ""}
+            {session.department ? ` · ${session.department}` : ""}
           </p>
           <h2
             className={cx(
@@ -1297,8 +1389,11 @@ function Topbar({
               compact ? "text-lg sm:text-xl" : "text-2xl"
             )}
           >
-            {session.name}
+            {pageTitle ?? session.name}
           </h2>
+          {pageTitle && (
+            <p className="mt-0.5 truncate text-xs text-slate-500">{session.name}</p>
+          )}
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           {showNotifications && (
@@ -1366,7 +1461,7 @@ function ReportOverview({
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-5">
         <div className="min-w-0">
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-800">
-            {session.role === "department-head" ? "My Department Report" : "Report Overview"}
+            {writesDepartmentReports(session.role) ? "My Department Report" : "Report Overview"}
           </p>
           <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">{report.department}</h3>
           <p className="mt-1 break-words text-sm text-slate-600">
@@ -1430,19 +1525,20 @@ function ReportOverview({
               This report is approved and locked for record integrity.
             </div>
           )}
-          {session.role === "department-head" && report.status === "Returned" && (
+          {writesDepartmentReports(session.role) && report.status === "Returned" && (
             <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              This report was returned. Correct the issues and submit a new version from Daily Submission.
+              This report was returned. Open <span className="font-semibold">Returned Items</span>, tap{" "}
+              <span className="font-semibold">Fix & resubmit</span>, correct the brief, then submit again.
             </div>
           )}
-          {session.role === "department-head" && report.status === "Approved" && (
+          {writesDepartmentReports(session.role) && report.status === "Approved" && (
             <div className="mt-5 rounded-2xl border border-green-100 bg-green-50 p-4 text-sm text-green-800">
               This report is approved and locked for record integrity.
             </div>
           )}
         </Panel>
 
-        {session.role === "department-head" ? (
+        {writesDepartmentReports(session.role) ? (
           <Panel title="Chairman Messages" subtitle="Approval and correction messages sent to your department.">
             {reportNotifications.length ? (
               <div className="space-y-3">
@@ -1498,7 +1594,8 @@ function ChairmanDashboard({
   onStatusChange,
   onReturnRequest,
   onReportOpen,
-  onDepartmentSelect
+  onDepartmentSelect,
+  departmentRows
 }: {
   submissions: DepartmentSubmission[];
   leads: MarketingLead[];
@@ -1520,7 +1617,8 @@ function ChairmanDashboard({
   onStatusChange: (id: string, status: Exclude<SubmissionStatus, "Draft">) => void;
   onReturnRequest: (id: string) => void;
   onReportOpen: (id: string) => void;
-  onDepartmentSelect: (department: Department) => void;
+  onDepartmentSelect: (departmentId: string) => void;
+  departmentRows: DepartmentRow[];
 }) {
   const summaryRef = useRef<HTMLDivElement>(null);
 
@@ -1569,7 +1667,7 @@ function ChairmanDashboard({
       </div>
 
       <MetricGrid>
-        <MetricCard label="Departments Reporting" value={`${new Set(metrics.submitted.map((item) => item.department)).size}/${departments.length}`} tone="blue" />
+        <MetricCard label="Departments Reporting" value={`${new Set(metrics.submitted.map((item) => placeLabel(item.department, item.subsidiary))).size}/${departmentRows.length || departments.length}`} tone="blue" />
         <MetricCard label="Pending Chairman Review" value={metrics.pending.length.toString()} tone="amber" />
         <MetricCard label="Consolidated Revenue" value={formatNaira(metrics.totalRevenue)} tone="green" />
         <MetricCard label="Asset / Equipment Alerts" value={metrics.alerts.toString()} tone="red" />
@@ -1593,7 +1691,7 @@ function ChairmanDashboard({
       </Panel>
 
       <Panel title="Departmental Health Matrix" subtitle="Government/corporate style compliance view by arm. Click any department to open its approval page.">
-        <DepartmentMatrix submissions={submissions} onDepartmentSelect={onDepartmentSelect} />
+        <DepartmentMatrix submissions={submissions} departmentRows={departmentRows} onDepartmentSelect={onDepartmentSelect} />
       </Panel>
 
       <Panel title="Marketing Pipeline for Chairman View" subtitle="Business development activity assigned to operating arms.">
@@ -1606,7 +1704,10 @@ function ChairmanDashboard({
 function ChairmanApprovalPage({
   submissions,
   approvalActions,
+  departmentRows,
+  selectedSubsidiary,
   selectedDepartment,
+  onSelectedSubsidiaryChange,
   onSelectedDepartmentChange,
   onStatusChange,
   onReturnRequest,
@@ -1614,20 +1715,26 @@ function ChairmanApprovalPage({
 }: {
   submissions: DepartmentSubmission[];
   approvalActions: ApprovalAction[];
+  departmentRows: DepartmentRow[];
+  selectedSubsidiary: string;
   selectedDepartment: Department | "All";
+  onSelectedSubsidiaryChange: (subsidiary: string) => void;
   onSelectedDepartmentChange: (department: Department | "All") => void;
   onStatusChange: (id: string, status: Exclude<SubmissionStatus, "Draft">) => void;
   onReturnRequest: (id: string) => void;
   onReportOpen: (id: string) => void;
 }) {
-  const filtered =
-    selectedDepartment === "All"
-      ? submissions.filter((submission) => submission.status !== "Draft")
-      : submissions.filter((submission) => submission.department === selectedDepartment && submission.status !== "Draft");
-  const filteredActions =
-    selectedDepartment === "All"
-      ? approvalActions
-      : approvalActions.filter((action) => action.department === selectedDepartment);
+  const groups = groupBySubsidiary(departmentRows);
+  const innerDepartments = selectedSubsidiary === "All"
+    ? departmentRows
+    : departmentRows.filter((item) => item.subsidiaryName === selectedSubsidiary);
+  const inScope = (department: string, subsidiary?: string) => {
+    if (selectedSubsidiary !== "All" && subsidiary !== selectedSubsidiary) return false;
+    if (selectedDepartment !== "All" && department !== selectedDepartment) return false;
+    return true;
+  };
+  const filtered = submissions.filter((submission) => submission.status !== "Draft" && inScope(submission.department, submission.subsidiary));
+  const filteredActions = approvalActions.filter((action) => inScope(action.department, action.subsidiary));
 
   return (
     <div className="space-y-6">
@@ -1635,16 +1742,28 @@ function ChairmanApprovalPage({
         title="Chairman Approval Queue"
         subtitle="Full-screen review workspace for approving or returning departmental daily submissions."
         action={
-          <select
-            value={selectedDepartment}
-            onChange={(event) => onSelectedDepartmentChange(event.target.value as Department | "All")}
-            className="form-control w-72"
-          >
-            <option value="All">All departments</option>
-            {departments.map((department) => (
-              <option key={department} value={department}>{department}</option>
-            ))}
-          </select>
+          <div className="flex flex-wrap gap-3">
+            <select
+              value={selectedSubsidiary}
+              onChange={(event) => onSelectedSubsidiaryChange(event.target.value)}
+              className="form-control w-72"
+            >
+              <option value="All">All subsidiaries</option>
+              {groups.map((group) => (
+                <option key={group.id} value={group.name}>{group.name}</option>
+              ))}
+            </select>
+            <select
+              value={selectedDepartment}
+              onChange={(event) => onSelectedDepartmentChange(event.target.value)}
+              className="form-control w-72"
+            >
+              <option value="All">All departments</option>
+              {innerDepartments.map((department) => (
+                <option key={department.id} value={department.name}>{department.name}</option>
+              ))}
+            </select>
+          </div>
         }
       />
       <Panel title="Approval Register" subtitle="Chairman and General Manager decision actions for departmental reports.">
@@ -1660,31 +1779,59 @@ function ChairmanApprovalPage({
 function DepartmentReportsPage({
   submissions,
   approvalActions,
+  departmentRows,
   onReportOpen
 }: {
   submissions: DepartmentSubmission[];
   approvalActions: ApprovalAction[];
+  departmentRows: DepartmentRow[];
   onReportOpen: (id: string) => void;
 }) {
+  const groups = groupBySubsidiary(departmentRows);
+  const sections: Array<{ id: string; name: string; departments: Array<{ id: string; name: string }> }> = groups.length
+    ? groups.map((group) => ({
+        id: group.id,
+        name: group.name,
+        departments: group.departments.map((department) => ({ id: department.id, name: department.name }))
+      }))
+    : [{
+        id: "all",
+        name: "Departments",
+        departments: (departmentRows.length ? departmentRows : departments.map((name) => ({ id: name, name }))).map((department) => ({
+          id: department.id,
+          name: department.name
+        }))
+      }];
+
   return (
     <div className="space-y-6">
       <PageTitle
         title="Department Reports"
-        subtitle="Submitted daily reports by department, including job completions, jobs in progress, equipment status, and challenges."
+        subtitle="Submitted daily reports by subsidiary, then by the department inside it."
       />
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {departments.map((department) => {
-          const count = submissions.filter((submission) => submission.department === department).length;
-          const latest = submissions.find((submission) => submission.department === department);
-          return (
-            <div key={department} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-sm font-semibold text-slate-950">{department}</p>
-              <p className="mt-2 text-3xl font-semibold text-blue-800">{count}</p>
-              <p className="mt-1 text-xs text-slate-500">reports on file</p>
-              <div className="mt-4">{latest ? <StatusPill status={latest.status} /> : <span className="pill bg-slate-100 text-slate-600 ring-slate-200">No report</span>}</div>
+      <div className="space-y-8">
+        {sections.map((group) => (
+          <section key={group.id} className="space-y-4">
+            <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-blue-800">{group.name}</h3>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {group.departments.map((department) => {
+                const matches = (submission: DepartmentSubmission) =>
+                  submission.department === department.name &&
+                  (group.name === "Departments" || !submission.subsidiary || submission.subsidiary === group.name);
+                const count = submissions.filter(matches).length;
+                const latest = submissions.find(matches);
+                return (
+                  <div key={department.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <p className="text-sm font-semibold text-slate-950">{department.name}</p>
+                    <p className="mt-2 text-3xl font-semibold text-blue-800">{count}</p>
+                    <p className="mt-1 text-xs text-slate-500">reports on file</p>
+                    <div className="mt-4">{latest ? <StatusPill status={latest.status} /> : <span className="pill bg-slate-100 text-slate-600 ring-slate-200">No report</span>}</div>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
+          </section>
+        ))}
       </div>
       <Panel title="All Department Report Rows" subtitle="Detailed report register for executive review and audit trail.">
         <SubmissionsTable submissions={submissions} onReportOpen={onReportOpen} />
@@ -1694,7 +1841,7 @@ function DepartmentReportsPage({
           {submissions.map((submission) => (
             <div key={submission.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="font-semibold text-slate-950">{submission.department}</p>
+                <p className="font-semibold text-slate-950">{placeLabel(submission.department, submission.subsidiary)}</p>
                 <StatusPill status={submission.status} />
               </div>
               <p className="mt-3 text-sm leading-6 text-slate-600">{submission.summary}</p>
@@ -1727,7 +1874,7 @@ function AssetsPage({
   onCreate
 }: {
   assets: AssetRecord[];
-  departments: Array<{ id: string; name: string }>;
+  departments: DepartmentRow[];
   onCreate: (asset: AssetRecord) => Promise<void>;
 }) {
   const [form, setForm] = useState({
@@ -1737,7 +1884,8 @@ function AssetsPage({
     purchase_date: "",
     supplier_name: "",
     serial_number: "",
-    department_id: "Corporate Administration" as Department,
+    subsidiary_id: "",
+    department_id: "",
     custodian_name: "",
     warranty_expiration: "",
     maintenance_schedule_interval: "Every 30 days",
@@ -1785,7 +1933,8 @@ function AssetsPage({
         purchase_date: "",
         supplier_name: "",
         serial_number: "",
-        department_id: (departmentOptions[0]?.name as Department) || "Corporate Administration",
+        subsidiary_id: "",
+        department_id: "",
         custodian_name: "",
         warranty_expiration: "",
         maintenance_schedule_interval: "Every 30 days",
@@ -1821,18 +1970,13 @@ function AssetsPage({
           <FormInput label="Purchase Date" value={form.purchase_date} onChange={(value) => setForm({ ...form, purchase_date: value })} />
           <FormInput label="Supplier" value={form.supplier_name} onChange={(value) => setForm({ ...form, supplier_name: value })} />
           <FormInput label="Serial Number" value={form.serial_number} onChange={(value) => setForm({ ...form, serial_number: value })} />
-          <label className="block">
-            <span className="field-label">Department</span>
-            <select
-              value={form.department_id}
-              onChange={(event) => setForm({ ...form, department_id: event.target.value as Department })}
-              className="form-control"
-            >
-              {(departmentOptions.length ? departmentOptions.map((item) => item.name) : departments).map((name) => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
-          </label>
+          <SubsidiaryDepartmentFields
+            departments={departmentOptions}
+            subsidiaryId={form.subsidiary_id}
+            departmentId={form.department_id}
+            onSubsidiaryId={(id) => setForm({ ...form, subsidiary_id: id, department_id: "" })}
+            onDepartmentId={(id) => setForm({ ...form, department_id: id })}
+          />
           <FormInput label="Custodian" value={form.custodian_name} onChange={(value) => setForm({ ...form, custodian_name: value })} />
           <FormInput label="Warranty Expiration" value={form.warranty_expiration} onChange={(value) => setForm({ ...form, warranty_expiration: value })} />
           <FormInput label="Maintenance Interval" value={form.maintenance_schedule_interval} onChange={(value) => setForm({ ...form, maintenance_schedule_interval: value })} />
@@ -1854,7 +1998,7 @@ function AssetsPage({
           </label>
           {error && <div className="md:col-span-2 xl:col-span-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           <div className="md:col-span-2 xl:col-span-3">
-            <button type="submit" disabled={saving || !form.asset_id.trim() || !form.name.trim() || !form.custodian_name.trim()} className="primary-button disabled:opacity-60">
+            <button type="submit" disabled={saving || !form.asset_id.trim() || !form.name.trim() || !form.custodian_name.trim() || !form.department_id} className="primary-button disabled:opacity-60">
               {saving ? "Saving asset..." : "Save Asset"}
             </button>
           </div>
@@ -1901,38 +2045,57 @@ function UsersPage() {
     full_name: string;
     role: string;
     is_active: boolean;
-    departments?: { name: string } | null;
+    email: string;
+    departments?: { name: string; subsidiaryName?: string | null } | null;
+    subsidiaryName?: string | null;
   }>>([]);
-  const [departmentOptions, setDepartmentOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [departmentOptions, setDepartmentOptions] = useState<DepartmentRow[]>([]);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("general-manager");
+  const [subsidiaryId, setSubsidiaryId] = useState("");
   const [departmentId, setDepartmentId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [createdLogin, setCreatedLogin] = useState<{ email: string; password: string; fullName: string; role: string } | null>(null);
+  const [resetUserId, setResetUserId] = useState<string | null>(null);
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetResult, setResetResult] = useState<{ email: string; password: string; fullName: string } | null>(null);
+
+  async function getAccessToken() {
+    const supabase = (await import("@/lib/supabase/client")).getSupabaseBrowser();
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) throw new Error("You must be signed in to manage users.");
+    return token;
+  }
 
   async function loadUsers() {
-    const [{ fetchProfiles: loadProfiles, fetchDepartments: loadDepartments }] = await Promise.all([
-      import("@/lib/ims/data")
+    const token = await getAccessToken();
+    const [{ fetchDepartments: loadDepartments }] = await Promise.all([import("@/lib/ims/data")]);
+    const [listResponse, deptRows] = await Promise.all([
+      fetch("/api/users/list", {
+        headers: { Authorization: `Bearer ${token}` }
+      }),
+      loadDepartments()
     ]);
-    const [profileRows, deptRows] = await Promise.all([loadProfiles(), loadDepartments()]);
+    const listPayload = await listResponse.json();
+    if (!listResponse.ok) throw new Error(listPayload.error || "Failed to load users");
+
     setProfiles(
-      profileRows.map((row: any) => ({
+      (listPayload.users ?? []).map((row: any) => ({
         id: row.id as string,
         full_name: row.full_name as string,
         role: row.role as string,
         is_active: Boolean(row.is_active),
-        departments: Array.isArray(row.departments)
-          ? (row.departments[0] ? { name: row.departments[0].name as string } : null)
-          : row.departments
-            ? { name: row.departments.name as string }
-            : null
+        email: (row.email as string) || "",
+        departments: row.departments ? { name: row.departments.name as string, subsidiaryName: row.departments.subsidiaryName ?? null } : null,
+        subsidiaryName: row.subsidiaryName ?? null
       }))
     );
     setDepartmentOptions(deptRows);
-    if (!departmentId && deptRows[0]) setDepartmentId(deptRows[0].id);
   }
 
   useEffect(() => {
@@ -1944,12 +2107,9 @@ function UsersPage() {
     setBusy(true);
     setError("");
     setCreatedLogin(null);
+    setResetResult(null);
     try {
-      const supabase = (await import("@/lib/supabase/client")).getSupabaseBrowser();
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("You must be signed in to create users.");
-
+      const token = await getAccessToken();
       const response = await fetch("/api/users/create", {
         method: "POST",
         headers: {
@@ -1961,7 +2121,8 @@ function UsersPage() {
           password,
           fullName: fullName.trim(),
           role,
-          departmentId: role === "department-head" ? departmentId : null
+          departmentId: role === "department-head" || role === "manager" ? departmentId : null,
+          subsidiaryId: role === "executive-director" ? subsidiaryId : null
         })
       });
       const payload = await response.json();
@@ -1977,6 +2138,8 @@ function UsersPage() {
       setEmail("");
       setPassword("");
       setRole("general-manager");
+      setSubsidiaryId("");
+      setDepartmentId("");
       await loadUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create user");
@@ -1985,9 +2148,46 @@ function UsersPage() {
     }
   }
 
+  async function submitPasswordReset(event: FormEvent) {
+    event.preventDefault();
+    if (!resetUserId) return;
+    setResetBusy(true);
+    setError("");
+    setResetResult(null);
+    try {
+      const token = await getAccessToken();
+      const response = await fetch("/api/users/reset-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          userId: resetUserId,
+          password: resetPassword
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Failed to reset password");
+
+      setResetResult({
+        email: payload.email || "",
+        password: resetPassword,
+        fullName: payload.fullName || ""
+      });
+      setResetPassword("");
+      setResetUserId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reset password");
+    } finally {
+      setResetBusy(false);
+    }
+  }
+
   const gmCount = profiles.filter((item) => item.role === "general_manager").length;
   const headCount = profiles.filter((item) => item.role === "department_head").length;
   const marketingCount = profiles.filter((item) => item.role === "marketing_officer").length;
+  const resetTarget = profiles.find((item) => item.id === resetUserId);
 
   return (
     <div className="space-y-6">
@@ -2012,7 +2212,12 @@ function UsersPage() {
             <span className="field-label">Role</span>
             <select value={role} onChange={(event) => setRole(event.target.value as Role)} className="form-control">
               <option value="general-manager">General Manager</option>
-              <option value="department-head">Department Head</option>
+              <option value="managing-director">Managing Director</option>
+              <option value="executive-director">Executive Director</option>
+              <option value="director-of-administration">Director of Administration</option>
+              <option value="human-resources">Central Human Resources</option>
+              <option value="manager">Manager</option>
+              <option value="department-head">Unit head</option>
               <option value="marketing-officer">Marketing Officer</option>
             </select>
           </label>
@@ -2024,12 +2229,24 @@ function UsersPage() {
             <span className="field-label">Temporary password</span>
             <input type="text" value={password} onChange={(event) => setPassword(event.target.value)} className="form-control" placeholder="Create a password to share" required minLength={8} />
           </label>
-          {role === "department-head" && (
+          {(role === "department-head" || role === "manager") && (
+            <div className="md:col-span-2 grid gap-4 md:grid-cols-2">
+              <SubsidiaryDepartmentFields
+                departments={departmentOptions}
+                subsidiaryId={subsidiaryId}
+                departmentId={departmentId}
+                onSubsidiaryId={setSubsidiaryId}
+                onDepartmentId={setDepartmentId}
+              />
+            </div>
+          )}
+          {role === "executive-director" && (
             <label className="block md:col-span-2">
-              <span className="field-label">Department arm</span>
-              <select value={departmentId} onChange={(event) => setDepartmentId(event.target.value)} className="form-control" required>
-                {departmentOptions.map((item) => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
+              <span className="field-label">Subsidiary</span>
+              <select value={subsidiaryId} onChange={(event) => setSubsidiaryId(event.target.value)} className="form-control" required>
+                <option value="">Select subsidiary</option>
+                {groupBySubsidiary(departmentOptions).map((group) => (
+                  <option key={group.id} value={group.id}>{group.name}</option>
                 ))}
               </select>
             </label>
@@ -2046,7 +2263,7 @@ function UsersPage() {
 
         {createdLogin && (
           <div className="mt-5 rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
-            <p className="font-semibold">Account created â€” share these login details</p>
+            <p className="font-semibold">Account created — share these login details</p>
             <p className="mt-2"><span className="font-semibold">Name:</span> {createdLogin.fullName}</p>
             <p className="mt-1"><span className="font-semibold">Role:</span> {createdLogin.role}</p>
             <p className="mt-1"><span className="font-semibold">Email:</span> {createdLogin.email}</p>
@@ -2055,16 +2272,94 @@ function UsersPage() {
         )}
       </Panel>
 
-      <Panel title="Active IMS Users" subtitle="Accounts currently registered in Supabase Auth + profiles.">
-        <SimpleTable
-          headers={["Name", "Role", "Department", "Status"]}
-          rows={profiles.map((profile) => [
-            profile.full_name,
-            roleFromDbLabel(profile.role),
-            profile.departments?.name || "â€”",
-            profile.is_active ? "Active" : "Inactive"
-          ])}
-        />
+      <Panel title="Active IMS Users" subtitle="Review each account login email. Passwords cannot be viewed later — reset a temporary password if needed.">
+        <div className="space-y-3">
+          {profiles.length ? (
+            profiles.map((profile) => (
+              <div key={profile.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-950">{profile.full_name}</p>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {roleFromDbLabel(profile.role)}
+                      {profile.subsidiaryName ? ` · ${profile.subsidiaryName}` : ""}
+                      {profile.departments?.subsidiaryName && !profile.subsidiaryName ? ` · ${profile.departments.subsidiaryName}` : ""}
+                      {profile.departments?.name ? ` · ${profile.departments.name}` : ""}
+                    </p>
+                    <p className="mt-2 break-all text-sm font-medium text-blue-900">
+                      Login email: {profile.email || "Not available"}
+                    </p>
+                    <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      {profile.is_active ? "Active" : "Inactive"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetUserId(profile.id);
+                      setResetPassword("");
+                      setResetResult(null);
+                      setCreatedLogin(null);
+                      setError("");
+                    }}
+                    className="table-button text-blue-800"
+                  >
+                    Reset password
+                  </button>
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No users yet" text="Created IMS accounts will appear here with their login emails." />
+          )}
+        </div>
+
+        {resetTarget && (
+          <form onSubmit={submitPasswordReset} className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <p className="text-sm font-semibold text-amber-950">
+              Reset temporary password for {resetTarget.full_name}
+            </p>
+            <p className="mt-1 text-sm text-amber-900">
+              Login email: {resetTarget.email || "Not available"}
+            </p>
+            <label className="mt-4 block">
+              <span className="field-label">New temporary password</span>
+              <input
+                type="text"
+                value={resetPassword}
+                onChange={(event) => setResetPassword(event.target.value)}
+                className="form-control"
+                placeholder="Create a new password to share"
+                required
+                minLength={8}
+              />
+            </label>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button type="submit" disabled={resetBusy} className="primary-button disabled:opacity-60">
+                {resetBusy ? "Saving..." : "Save new password"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setResetUserId(null);
+                  setResetPassword("");
+                }}
+                className="secondary-button"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        {resetResult && (
+          <div className="mt-5 rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
+            <p className="font-semibold">Password reset — share these login details</p>
+            <p className="mt-2"><span className="font-semibold">Name:</span> {resetResult.fullName}</p>
+            <p className="mt-1"><span className="font-semibold">Email:</span> {resetResult.email}</p>
+            <p className="mt-1"><span className="font-semibold">New password:</span> {resetResult.password}</p>
+          </div>
+        )}
       </Panel>
     </div>
   );
@@ -2072,9 +2367,14 @@ function UsersPage() {
 
 function roleFromDbLabel(role: string) {
   if (role === "general_manager") return "General Manager";
-  if (role === "department_head") return "Department Head";
+  if (role === "managing_director") return "Managing Director";
+  if (role === "executive_director") return "Executive Director";
+  if (role === "director_of_administration") return "Director of Administration";
+  if (role === "human_resources") return "Central Human Resources";
+  if (role === "department_head") return "Unit head";
+  if (role === "manager") return "Manager";
   if (role === "marketing_officer") return "Marketing Officer";
-  if (role === "chairman") return "Chairman";
+  if (role === "chairman") return "Board Chairman";
   return role;
 }
 
@@ -2086,7 +2386,8 @@ function GeneralManagerDashboard({
   metrics,
   onReportOpen,
   onStatusChange,
-  onReturnRequest
+  onReturnRequest,
+  departmentRows
 }: {
   activePage: PageId;
   submissions: DepartmentSubmission[];
@@ -2103,6 +2404,7 @@ function GeneralManagerDashboard({
   onReportOpen: (id: string) => void;
   onStatusChange: (id: string, status: Exclude<SubmissionStatus, "Draft">) => void | Promise<void>;
   onReturnRequest: (id: string) => void;
+  departmentRows: DepartmentRow[];
 }) {
   const critical = submissions.filter((item) => item.priority === "Critical");
   const attentionAssets = assetList.filter(
@@ -2119,7 +2421,7 @@ function GeneralManagerDashboard({
           subtitle="General Manager monitoring page for department submission discipline, returned reports, and pending Chairman approvals."
         />
         <Panel title="Compliance Matrix" subtitle="Submission status by arm.">
-          <DepartmentMatrix submissions={submissions} />
+          <DepartmentMatrix submissions={submissions} departmentRows={departmentRows} />
         </Panel>
         <Panel title="Compliance Register" subtitle="All department submissions and review status.">
           <SubmissionsTable submissions={submissions} onReportOpen={onReportOpen} />
@@ -2241,13 +2543,15 @@ function DepartmentHeadPortal({
   session,
   submissions,
   onSubmit,
-  onReportOpen
+  onReportOpen,
+  onPageChange
 }: {
   activePage: PageId;
   session: Session;
   submissions: DepartmentSubmission[];
   onSubmit: (submission: DepartmentSubmission) => Promise<unknown>;
   onReportOpen: (id: string) => void;
+  onPageChange: (page: PageId) => void;
 }) {
   const department = session.department ?? "Corporate Administration";
   const blueprint = departmentBlueprints[department] ?? {
@@ -2259,26 +2563,78 @@ function DepartmentHeadPortal({
     equipmentOptions: ["Office Systems", "Shared Equipment", "Records Archive"],
     progressPlaceholder: "Describe active work in progress for today."
   };
-  const [form, setForm] = useState({
-    revenue: "",
-    inquiries: "",
-    attendance: "",
-    activeOperations: "",
-    cashIn: "",
-    expenses: "",
-    assetsFlagged: "",
-    jobsCompleted: blueprint.completedOptions[0],
-    jobsInProgress: "",
-    equipmentStatus: [blueprint.equipmentOptions[0]],
-    departmentUpdate: "",
-    currentProjects: "",
-    upcomingProjects: "",
-    growthIdeas: "",
-    challenges: "",
-    summary: ""
-  });
+
+  function createEmptyForm() {
+    return {
+      revenue: "",
+      inquiries: "",
+      attendance: "",
+      activeOperations: "",
+      cashIn: "",
+      expenses: "",
+      assetsFlagged: "",
+      jobsCompleted: blueprint.completedOptions[0],
+      jobsInProgress: "",
+      equipmentStatus: [blueprint.equipmentOptions[0]],
+      departmentUpdate: "",
+      currentProjects: "",
+      upcomingProjects: "",
+      growthIdeas: "",
+      challenges: "",
+      summary: ""
+    };
+  }
+
+  const [form, setForm] = useState(createEmptyForm);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [step, setStep] = useState(1);
+  const [resumeParentId, setResumeParentId] = useState<string | null>(null);
+  const [resumeLabel, setResumeLabel] = useState("");
+  const [showOptionalSummary, setShowOptionalSummary] = useState(false);
+
+  const ownReports = submissions.filter((item) =>
+    session.departmentId ? item.departmentId === session.departmentId : item.department === department
+  );
+  const returnedReports = ownReports.filter((item) => item.status === "Returned");
+  const draftReports = ownReports.filter((item) => item.status === "Draft");
+  const today = new Date().toISOString().slice(0, 10);
+  const todayReports = ownReports.filter((item) => item.date === today);
+  const todayDraft = todayReports.find((item) => item.status === "Draft");
+  const todayPending = todayReports.find((item) => item.status === "Pending Chairman Review");
+  const todayReturned = todayReports.find((item) => item.status === "Returned");
+  const todayApproved = todayReports.find((item) => item.status === "Approved");
+
+  function loadReportIntoForm(report: DepartmentSubmission, mode: "draft" | "returned") {
+    setForm({
+      revenue: report.revenue ? String(report.revenue) : "",
+      inquiries: report.inquiries ? String(report.inquiries) : "",
+      attendance: report.attendance ? String(report.attendance) : "",
+      activeOperations: report.activeOperations ? String(report.activeOperations) : "",
+      cashIn: report.cashIn ? String(report.cashIn) : "",
+      expenses: report.expenses ? String(report.expenses) : "",
+      assetsFlagged: report.assetsFlagged ? String(report.assetsFlagged) : "",
+      jobsCompleted: report.jobsCompleted || blueprint.completedOptions[0],
+      jobsInProgress: report.jobsInProgress || "",
+      equipmentStatus: report.equipmentStatus?.length ? report.equipmentStatus : [blueprint.equipmentOptions[0]],
+      departmentUpdate: report.departmentUpdate || "",
+      currentProjects: report.currentProjects || "",
+      upcomingProjects: report.upcomingProjects || "",
+      growthIdeas: report.growthIdeas || "",
+      challenges: report.challenges || "",
+      summary: report.summary && report.summary !== "No narrative summary supplied." ? report.summary : ""
+    });
+    setResumeParentId(mode === "returned" ? report.dbId || null : null);
+    setResumeLabel(
+      mode === "returned"
+        ? `Fixing returned report from ${report.date}`
+        : `Continuing draft from ${report.date}`
+    );
+    setShowOptionalSummary(Boolean(report.summary && report.summary !== "No narrative summary supplied."));
+    setFormError("");
+    setStep(1);
+    onPageChange("Daily Submission");
+  }
 
   async function submitReport(status: "Draft" | "Pending Chairman Review") {
     setFormError("");
@@ -2291,12 +2647,15 @@ function DepartmentHeadPortal({
         !form.challenges.trim() && "Challenges / support needed"
       ].filter(Boolean);
       if (missing.length) {
-        setFormError(`Department Development Brief is required before submit: ${missing.join(", ")}.`);
+        setStep(1);
+        setFormError(`Complete the brief before submit: ${missing.join(", ")}.`);
         return;
       }
     }
     if (!session.departmentId) {
-      setFormError("Your profile has no department assigned. Ask the Chairman or General Manager to fix your user account.");
+      setFormError(
+        "Your profile has no department assigned. Ask the Chairman or General Manager to fix your user account."
+      );
       return;
     }
 
@@ -2322,39 +2681,26 @@ function DepartmentHeadPortal({
       challenges: form.challenges,
       summary: form.summary || "No narrative summary supplied.",
       status,
-      priority: Number(form.assetsFlagged) > 1 ? "Critical" : Number(form.assetsFlagged) > 0 ? "Attention" : "Normal"
+      priority:
+        Number(form.assetsFlagged) > 1 ? "Critical" : Number(form.assetsFlagged) > 0 ? "Attention" : "Normal",
+      parentReportId: resumeParentId
     };
 
     setSaving(true);
     try {
       await onSubmit(next);
-      setForm({
-        revenue: "",
-        inquiries: "",
-        attendance: "",
-        activeOperations: "",
-        cashIn: "",
-        expenses: "",
-        assetsFlagged: "",
-        jobsCompleted: blueprint.completedOptions[0],
-        jobsInProgress: "",
-        equipmentStatus: [blueprint.equipmentOptions[0]],
-        departmentUpdate: "",
-        currentProjects: "",
-        upcomingProjects: "",
-        growthIdeas: "",
-        challenges: "",
-        summary: ""
-      });
+      setForm(createEmptyForm());
+      setResumeParentId(null);
+      setResumeLabel("");
+      setShowOptionalSummary(false);
+      setStep(1);
+      if (status === "Pending Chairman Review") onPageChange("My Reports");
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Failed to save report");
     } finally {
       setSaving(false);
     }
   }
-
-  const ownReports = submissions.filter((item) => item.department === department);
-  const returnedReports = ownReports.filter((item) => item.status === "Returned");
 
   if (activePage === "My Reports") {
     return (
@@ -2363,6 +2709,26 @@ function DepartmentHeadPortal({
           title={`${department} Reports`}
           subtitle="Submission history and Chairman review status for this department."
         />
+        {draftReports.length > 0 && (
+          <Panel title="Continue a draft" subtitle="Pick up where you left off without retyping.">
+            <div className="space-y-3">
+              {draftReports.map((report) => (
+                <div
+                  key={report.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                >
+                  <div>
+                    <p className="font-semibold text-slate-950">{report.date}</p>
+                    <p className="mt-1 text-sm text-slate-600">Draft · {formatNaira(report.revenue)} revenue</p>
+                  </div>
+                  <button type="button" onClick={() => loadReportIntoForm(report, "draft")} className="primary-button">
+                    Continue draft
+                  </button>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        )}
         <Panel title="My Department Reports" subtitle="All reports submitted by this department head role.">
           <SubmissionsTable submissions={ownReports} onReportOpen={onReportOpen} mobileCards />
         </Panel>
@@ -2373,13 +2739,36 @@ function DepartmentHeadPortal({
   if (activePage === "Returned Items") {
     return (
       <div className="space-y-6">
-        <PageTitle
-          title="Returned Items"
-          subtitle="Department reports returned by the Chairman for correction or follow-up."
-        />
-        <Panel title="Returned Department Reports" subtitle="Rows requiring correction before resubmission.">
+        <PageTitle title="Returned Items" subtitle="Fix returned reports here, then resubmit to the Chairman." />
+        <Panel
+          title="Returned Department Reports"
+          subtitle="Tap Fix & resubmit to load the report into Daily Submission."
+        >
           {returnedReports.length ? (
-            <SubmissionsTable submissions={returnedReports} onReportOpen={onReportOpen} mobileCards />
+            <div className="space-y-3">
+              {returnedReports.map((report) => (
+                <div key={report.id} className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-amber-950">{report.date}</p>
+                      <p className="mt-1 text-sm text-amber-900">{report.summary}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => onReportOpen(report.id)} className="secondary-button">
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => loadReportIntoForm(report, "returned")}
+                        className="primary-button"
+                      >
+                        Fix & resubmit
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : (
             <EmptyState title="No returned reports" text="There are currently no returned reports for this department." />
           )}
@@ -2388,47 +2777,204 @@ function DepartmentHeadPortal({
     );
   }
 
+  const steps = [
+    { id: 1, label: "Brief" },
+    { id: 2, label: "Ops" },
+    { id: 3, label: "Numbers" }
+  ] as const;
+
+  function goToStep(nextStep: 1 | 2 | 3) {
+    setStep(nextStep);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 pb-28 lg:space-y-5 lg:pb-0">
       <PageTitle
-        title={`${department} Department Head Portal`}
-        subtitle="Daily operational data entry workspace. Submitted reports flow to the Chairman approval queue and General Manager compliance view."
+        title="Submit today’s report"
+        subtitle="Phone-friendly flow: Brief → Operations → Numbers. Save a draft anytime."
       />
-      <div className="space-y-6">
-        <Panel title="Daily Department Submission" subtitle="Enter only the daily facts for your department arm.">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <FormInput label="Revenue Reported" value={form.revenue} onChange={(value) => setForm({ ...form, revenue: value })} />
-            <FormInput label="Inquiries" value={form.inquiries} onChange={(value) => setForm({ ...form, inquiries: value })} />
-            <FormInput label="Attendance" value={form.attendance} onChange={(value) => setForm({ ...form, attendance: value })} />
-            <FormInput label="Active Operations" value={form.activeOperations} onChange={(value) => setForm({ ...form, activeOperations: value })} />
-            <FormInput label="Cash-In" value={form.cashIn} onChange={(value) => setForm({ ...form, cashIn: value })} />
-            <FormInput label="Expenses" value={form.expenses} onChange={(value) => setForm({ ...form, expenses: value })} />
-            <FormInput label="Assets Flagged" value={form.assetsFlagged} onChange={(value) => setForm({ ...form, assetsFlagged: value })} />
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+        {todayApproved ? (
+          <p className="text-sm font-medium text-emerald-800">
+            Today’s report is already <span className="font-semibold">Approved</span>. You can still submit an update
+            if needed.
+          </p>
+        ) : todayPending ? (
+          <p className="text-sm font-medium text-blue-800">
+            Today’s report is <span className="font-semibold">Pending Chairman Review</span>.
+            <button type="button" className="ml-2 font-semibold underline" onClick={() => onReportOpen(todayPending.id)}>
+              Open it
+            </button>
+          </p>
+        ) : todayReturned ? (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-medium text-amber-900">
+              Today’s report was <span className="font-semibold">Returned</span> for correction.
+            </p>
+            <button
+              type="button"
+              onClick={() => loadReportIntoForm(todayReturned, "returned")}
+              className="primary-button w-full sm:w-auto"
+            >
+              Fix & resubmit
+            </button>
           </div>
-          <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-sm font-semibold text-slate-950">{department} Operational Tracking</p>
-            <div className="mt-4 grid gap-4 xl:grid-cols-2">
-              <label className="block">
-                <span className="field-label">{blueprint.completedLabel}</span>
-                <select
-                  value={form.jobsCompleted}
-                  onChange={(event) => setForm({ ...form, jobsCompleted: event.target.value })}
-                  className="form-control"
-                >
-                  {blueprint.completedOptions.map((option) => (
-                    <option key={option} value={option}>{option}</option>
-                  ))}
-                </select>
-              </label>
-              <DepartmentEquipmentField
-                label={blueprint.equipmentLabel}
-                mode={blueprint.equipmentInput}
-                options={blueprint.equipmentOptions}
-                value={form.equipmentStatus}
-                onChange={(value) => setForm({ ...form, equipmentStatus: value })}
+        ) : todayDraft ? (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-medium text-slate-700">
+              You have a <span className="font-semibold">Draft</span> for today.
+            </p>
+            <button
+              type="button"
+              onClick={() => loadReportIntoForm(todayDraft, "draft")}
+              className="secondary-button w-full sm:w-auto"
+            >
+              Continue draft
+            </button>
+          </div>
+        ) : (
+          <p className="text-sm font-medium text-slate-600">No report for today yet. Start with the Brief.</p>
+        )}
+      </div>
+
+      {resumeLabel && (
+        <div className="rounded-2xl border border-blue-200 bg-blue-50 px-3 py-3 text-sm text-blue-900 sm:px-4">
+          <span className="font-semibold">{resumeLabel}</span>
+          <button
+            type="button"
+            className="mt-2 block font-semibold underline sm:mt-0 sm:ml-3 sm:inline"
+            onClick={() => {
+              setForm(createEmptyForm());
+              setResumeParentId(null);
+              setResumeLabel("");
+              goToStep(1);
+            }}
+          >
+            Start fresh instead
+          </button>
+        </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+        {steps.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => goToStep(item.id)}
+            className={cx(
+              "min-h-12 rounded-xl border px-1.5 py-2.5 text-center text-[12px] font-semibold leading-tight sm:min-h-0 sm:px-2 sm:py-3 sm:text-sm",
+              step === item.id
+                ? "border-blue-700 bg-blue-700 text-white"
+                : step > item.id
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : "border-slate-200 bg-white text-slate-500"
+            )}
+          >
+            {item.id}. {item.label}
+          </button>
+        ))}
+      </div>
+
+      <Panel
+        title={
+          step === 1
+            ? "Step 1 · Management brief"
+            : step === 2
+              ? "Step 2 · Operations"
+              : "Step 3 · Daily numbers"
+        }
+        subtitle={
+          step === 1
+            ? "Required. Write what the Chairman needs to know today."
+            : step === 2
+              ? "What your team completed and what is still running."
+              : "Quick figures. You can leave zeros if not applicable."
+        }
+      >
+        {step === 1 && (
+          <div className="space-y-4">
+            <NarrativeInput
+              label="Department update and current activities *"
+              value={form.departmentUpdate}
+              onChange={(value) => setForm({ ...form, departmentUpdate: value })}
+              placeholder="Give an update on your department and its current activities."
+            />
+            <NarrativeInput
+              label="Projects currently being worked on *"
+              value={form.currentProjects}
+              onChange={(value) => setForm({ ...form, currentProjects: value })}
+              placeholder="List active projects, workstreams, contracts, or operational tasks."
+            />
+            <NarrativeInput
+              label="Upcoming projects and plans *"
+              value={form.upcomingProjects}
+              onChange={(value) => setForm({ ...form, upcomingProjects: value })}
+              placeholder="State upcoming projects, plans, timelines, and preparation needs."
+            />
+            <NarrativeInput
+              label="Growth and development ideas *"
+              value={form.growthIdeas}
+              onChange={(value) => setForm({ ...form, growthIdeas: value })}
+              placeholder="Share plans and ideas for the growth and development of your department."
+            />
+            <label className="block">
+              <span className="field-label">Challenges / areas where support is needed *</span>
+              <textarea
+                value={form.challenges}
+                onChange={(event) => setForm({ ...form, challenges: event.target.value })}
+                className="form-control min-h-28 resize-none"
+                placeholder="State blockers, resource gaps, approval needs, faults, or unresolved operational issues."
               />
-            </div>
-            <label className="mt-4 block">
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowOptionalSummary((current) => !current)}
+              className="min-h-11 text-sm font-semibold text-blue-800 underline"
+            >
+              {showOptionalSummary ? "Hide optional summary" : "Add optional short summary"}
+            </button>
+            {showOptionalSummary && (
+              <label className="block">
+                <span className="field-label">Narrative summary (optional)</span>
+                <textarea
+                  value={form.summary}
+                  onChange={(event) => setForm({ ...form, summary: event.target.value })}
+                  className="form-control min-h-24 resize-none"
+                  placeholder="One short paragraph if you want to highlight a priority for the Chairman."
+                />
+              </label>
+            )}
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="space-y-4">
+            <label className="block">
+              <span className="field-label">{blueprint.completedLabel}</span>
+              <select
+                value={form.jobsCompleted}
+                onChange={(event) => setForm({ ...form, jobsCompleted: event.target.value })}
+                className="form-control"
+              >
+                {blueprint.completedOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <DepartmentEquipmentField
+              label={blueprint.equipmentLabel}
+              mode={blueprint.equipmentInput}
+              options={blueprint.equipmentOptions}
+              value={form.equipmentStatus}
+              onChange={(value) => setForm({ ...form, equipmentStatus: value })}
+            />
+            <label className="block">
               <span className="field-label">{blueprint.progressLabel}</span>
               <textarea
                 value={form.jobsInProgress}
@@ -2438,76 +2984,71 @@ function DepartmentHeadPortal({
               />
             </label>
           </div>
-          <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50/40 p-4">
-            <p className="text-base font-semibold text-slate-950">Department Development Brief</p>
-            <p className="mt-1 text-sm leading-6 text-slate-600">
-              Provide a clear management update for the Chairman and General Manager.
-            </p>
-            <div className="mt-4 grid gap-4 xl:grid-cols-2">
-              <NarrativeInput
-                label="Department update and current activities"
-                value={form.departmentUpdate}
-                onChange={(value) => setForm({ ...form, departmentUpdate: value })}
-                placeholder="Give an update on your department and its current activities."
-              />
-              <NarrativeInput
-                label="Projects currently being worked on"
-                value={form.currentProjects}
-                onChange={(value) => setForm({ ...form, currentProjects: value })}
-                placeholder="List active projects, workstreams, contracts, or operational tasks."
-              />
-              <NarrativeInput
-                label="Upcoming projects and plans"
-                value={form.upcomingProjects}
-                onChange={(value) => setForm({ ...form, upcomingProjects: value })}
-                placeholder="State upcoming projects, plans, timelines, and preparation needs."
-              />
-              <NarrativeInput
-                label="Growth and development ideas"
-                value={form.growthIdeas}
-                onChange={(value) => setForm({ ...form, growthIdeas: value })}
-                placeholder="Share plans and ideas for the growth and development of your department."
-              />
-            </div>
+        )}
+
+        {step === 3 && (
+          <div className="grid grid-cols-2 gap-3 sm:gap-4">
+            <FormInput label="Revenue Reported" value={form.revenue} onChange={(value) => setForm({ ...form, revenue: value })} />
+            <FormInput label="Inquiries" value={form.inquiries} onChange={(value) => setForm({ ...form, inquiries: value })} />
+            <FormInput label="Attendance" value={form.attendance} onChange={(value) => setForm({ ...form, attendance: value })} />
+            <FormInput
+              label="Active Operations"
+              value={form.activeOperations}
+              onChange={(value) => setForm({ ...form, activeOperations: value })}
+            />
+            <FormInput label="Cash-In" value={form.cashIn} onChange={(value) => setForm({ ...form, cashIn: value })} />
+            <FormInput label="Expenses" value={form.expenses} onChange={(value) => setForm({ ...form, expenses: value })} />
+            <FormInput
+              label="Assets Flagged"
+              value={form.assetsFlagged}
+              onChange={(value) => setForm({ ...form, assetsFlagged: value })}
+            />
           </div>
-          <label className="mt-4 block">
-            <span className="field-label">Challenges / areas where support is needed</span>
-            <textarea
-              value={form.challenges}
-              onChange={(event) => setForm({ ...form, challenges: event.target.value })}
-              className="form-control min-h-24 resize-none"
-              placeholder="State blockers, resource gaps, approval needs, faults, or unresolved operational issues."
-            />
-          </label>
-          <label className="mt-4 block">
-            <span className="field-label">Narrative summary</span>
-            <textarea
-              value={form.summary}
-              onChange={(event) => setForm({ ...form, summary: event.target.value })}
-              className="form-control min-h-32 resize-none"
-              placeholder="State todayâ€™s activity, issues, required approvals, and tomorrowâ€™s priority."
-            />
-          </label>
-          <div className="sticky bottom-[4.75rem] z-10 mt-5 grid gap-3 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur md:grid-cols-2 lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
-            {formError && (
-              <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</div>
+        )}
+
+        <div className="mobile-submit-bar mt-5 space-y-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-lg lg:static lg:mt-5 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
+          {formError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            {step > 1 ? (
+              <button type="button" onClick={() => goToStep((step - 1) as 1 | 2 | 3)} className="secondary-button w-full">
+                Back
+              </button>
+            ) : (
+              <button
+                disabled={saving}
+                onClick={() => submitReport("Draft")}
+                className="secondary-button w-full disabled:opacity-60"
+              >
+                {saving ? "Saving..." : "Save Draft"}
+              </button>
             )}
-            <button disabled={saving} onClick={() => submitReport("Draft")} className="secondary-button w-full disabled:opacity-60">
-              {saving ? "Saving..." : "Save Draft"}
-            </button>
+            {step < 3 ? (
+              <button type="button" onClick={() => goToStep((step + 1) as 1 | 2 | 3)} className="primary-button w-full">
+                Continue
+              </button>
+            ) : (
+              <button
+                disabled={saving}
+                onClick={() => submitReport("Pending Chairman Review")}
+                className="primary-button w-full disabled:opacity-60"
+              >
+                {saving ? "Submitting..." : "Submit"}
+              </button>
+            )}
+          </div>
+          {step === 3 && (
             <button
               disabled={saving}
-              onClick={() => submitReport("Pending Chairman Review")}
-              className="primary-button w-full disabled:opacity-60"
+              onClick={() => submitReport("Draft")}
+              className="secondary-button w-full disabled:opacity-60"
             >
-              {saving ? "Submitting..." : "Submit to Chairman"}
+              {saving ? "Saving..." : "Save Draft instead"}
             </button>
-          </div>
-        </Panel>
-        <Panel title="My Department Reports" subtitle="Submission history and Chairman review status.">
-          <SubmissionsTable submissions={ownReports} onReportOpen={onReportOpen} mobileCards />
-        </Panel>
-      </div>
+          )}
+        </div>
+      </Panel>
     </div>
   );
 }
@@ -2515,17 +3056,20 @@ function DepartmentHeadPortal({
 function MarketingPortal({
   activePage,
   leads,
+  departments: departmentOptions,
   onSubmit
 }: {
   activePage: PageId;
   leads: MarketingLead[];
+  departments: DepartmentRow[];
   onSubmit: (lead: MarketingLead) => Promise<void>;
 }) {
   const [form, setForm] = useState({
     client: "",
     proposal: "",
     quotation: "",
-    assignedDepartment: "ICT" as Department,
+    subsidiaryId: "",
+    assignedDepartment: "",
     status: "New" as MarketingLead["status"]
   });
   const [error, setError] = useState("");
@@ -2544,7 +3088,7 @@ function MarketingPortal({
         status: form.status,
         visitDate: new Date().toISOString().slice(0, 10)
       });
-      setForm({ client: "", proposal: "", quotation: "", assignedDepartment: "ICT", status: "New" });
+      setForm({ client: "", proposal: "", quotation: "", subsidiaryId: "", assignedDepartment: "", status: "New" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save marketing lead");
     } finally {
@@ -2600,18 +3144,14 @@ function MarketingPortal({
           <FormInput label="Client / Organization" value={form.client} onChange={(value) => setForm({ ...form, client: value })} />
           <FormInput label="Proposal / Opportunity" value={form.proposal} onChange={(value) => setForm({ ...form, proposal: value })} />
           <FormInput label="Quotation Value" value={form.quotation} onChange={(value) => setForm({ ...form, quotation: value })} />
-          <label className="mt-4 block">
-            <span className="field-label">Assign lead to department</span>
-            <select
-              value={form.assignedDepartment}
-              onChange={(event) => setForm({ ...form, assignedDepartment: event.target.value as Department })}
-              className="form-control"
-            >
-              {departments.filter((item) => item !== "Corporate Administration").map((item) => (
-                <option key={item} value={item}>{item}</option>
-              ))}
-            </select>
-          </label>
+          <SubsidiaryDepartmentFields
+            departments={departmentOptions}
+            subsidiaryId={form.subsidiaryId}
+            departmentId={form.assignedDepartment}
+            onSubsidiaryId={(id) => setForm({ ...form, subsidiaryId: id, assignedDepartment: "" })}
+            onDepartmentId={(id) => setForm({ ...form, assignedDepartment: id })}
+            departmentName="Assign lead to department"
+          />
           <label className="mt-4 block">
             <span className="field-label">Pipeline status</span>
             <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as MarketingLead["status"] })} className="form-control">
@@ -2623,7 +3163,7 @@ function MarketingPortal({
           </label>
           <div className="sticky bottom-[4.75rem] z-10 mt-5 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
             {error && <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-            <button disabled={saving} onClick={submitLead} className="primary-button w-full disabled:opacity-60">
+            <button disabled={saving || !form.assignedDepartment} onClick={submitLead} className="primary-button w-full disabled:opacity-60">
               {saving ? "Saving..." : "Save Marketing Entry"}
             </button>
           </div>
@@ -2638,11 +3178,15 @@ function MarketingPortal({
 
 function PageTitle({ title, subtitle, action }: { title: string; subtitle: string; action?: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+    <div className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:gap-4 sm:rounded-3xl sm:p-6">
       <div className="min-w-0">
-        <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-blue-800 sm:text-xs">Tanjuriel Corporation IMS</p>
-        <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-slate-950 sm:text-3xl">{title}</h2>
-        <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">{subtitle}</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-800 sm:text-xs sm:tracking-[0.2em]">
+          Tanjuriel Corporation IMS
+        </p>
+        <h2 className="mt-1.5 text-xl font-semibold tracking-[-0.03em] text-slate-950 sm:mt-2 sm:text-3xl">
+          {title}
+        </h2>
+        <p className="mt-1.5 max-w-4xl text-sm leading-5 text-slate-600 sm:mt-2 sm:leading-6">{subtitle}</p>
       </div>
       {action}
     </div>
@@ -2706,7 +3250,7 @@ function SubmissionsTable({
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate font-semibold text-slate-950">{item.department}</p>
+                    <p className="truncate font-semibold text-slate-950">{placeLabel(item.department, item.subsidiary)}</p>
                     <p className="mt-1 text-xs text-slate-500">{item.date} Â· {item.submittedBy}</p>
                   </div>
                   <StatusPill status={item.status} />
@@ -2758,7 +3302,7 @@ function SubmissionsTable({
                 className={cx("hover:bg-slate-50", onReportOpen && "cursor-pointer")}
               >
                 <td className="px-4 py-3 font-semibold text-slate-950">
-                  <span>{item.department}</span>
+                  <span>{placeLabel(item.department, item.subsidiary)}</span>
                   {onReportOpen && <span className="ml-2 text-[11px] font-semibold text-blue-700">View overview</span>}
                 </td>
                 <td className="px-4 py-3 text-slate-600">{item.submittedBy}</td>
@@ -2803,34 +3347,59 @@ function SubmissionsTable({
 
 function DepartmentMatrix({
   submissions,
+  departmentRows,
   onDepartmentSelect
 }: {
   submissions: DepartmentSubmission[];
-  onDepartmentSelect?: (department: Department) => void;
+  departmentRows: DepartmentRow[];
+  onDepartmentSelect?: (departmentId: string) => void;
 }) {
+  const groups = groupBySubsidiary(departmentRows);
+  const sections: Array<{ id: string; name: string; departments: Array<{ id: string; name: string }> }> = groups.length
+    ? groups.map((group) => ({
+        id: group.id,
+        name: group.name,
+        departments: group.departments.map((department) => ({ id: department.id, name: department.name }))
+      }))
+    : [{
+        id: "all",
+        name: "Departments",
+        departments: (departmentRows.length ? departmentRows : departments.map((name) => ({ id: name, name }))).map((department) => ({
+          id: department.id,
+          name: department.name
+        }))
+      }];
+
   return (
-    <div className="grid gap-3 md:grid-cols-2">
-      {departments.map((department) => {
-        const latest = submissions.find((item) => item.department === department);
-        return (
-          <button
-            key={department}
-            onClick={() => onDepartmentSelect?.(department)}
-            className={cx(
-              "rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition",
-              onDepartmentSelect && "hover:border-blue-200 hover:bg-blue-50"
-            )}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-slate-950">{department}</p>
-                <p className="mt-1 text-xs text-slate-500">{latest ? latest.submittedBy : "No submission today"}</p>
-              </div>
-              {latest ? <StatusPill status={latest.status} /> : <span className="pill bg-slate-200 text-slate-600">Missing</span>}
-            </div>
-          </button>
-        );
-      })}
+    <div className="space-y-6">
+      {sections.map((group) => (
+        <section key={group.id} className="space-y-3">
+          <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-blue-800">{group.name}</h3>
+          <div className="grid gap-3 md:grid-cols-2">
+            {group.departments.map((department) => {
+              const latest = submissions.find((item) => item.department === department.name && (group.name === "Departments" || !item.subsidiary || item.subsidiary === group.name));
+              return (
+                <button
+                  key={department.id}
+                  onClick={() => onDepartmentSelect?.(department.id)}
+                  className={cx(
+                    "rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition",
+                    onDepartmentSelect && "hover:border-blue-200 hover:bg-blue-50"
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">{department.name}</p>
+                      <p className="mt-1 text-xs text-slate-500">{latest ? latest.submittedBy : "No submission today"}</p>
+                    </div>
+                    {latest ? <StatusPill status={latest.status} /> : <span className="pill bg-slate-200 text-slate-600">Missing</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
@@ -2911,7 +3480,7 @@ function ApprovalActionsTable({ actions }: { actions: ApprovalAction[] }) {
       headers={["Date/Time", "Department", "Actor", "Previous Status", "Action", "Comment"]}
       rows={actions.map((action) => [
         new Date(action.createdAt).toLocaleString("en-GB"),
-        action.department,
+        placeLabel(action.department, action.subsidiary),
         action.actor,
         action.previousStatus,
         action.action,
@@ -2970,8 +3539,9 @@ function NarrativeInput({
       <textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="form-control min-h-28 resize-none"
+        className="form-control min-h-32 resize-y sm:min-h-28 sm:resize-none"
         placeholder={placeholder}
+        rows={4}
       />
     </label>
   );

@@ -20,7 +20,26 @@ export type ProfileRow = {
   departments?: { id: string; name: string } | null;
 };
 
-export type DepartmentRow = { id: string; name: string };
+export type DepartmentRow = {
+  id: string;
+  name: string;
+  code?: string | null;
+  subsidiaryId?: string | null;
+  subsidiaryName?: string | null;
+  subsidiaryCode?: string | null;
+};
+
+function mapDepartment(row: any): DepartmentRow {
+  const subsidiary = Array.isArray(row.subsidiaries) ? row.subsidiaries[0] : row.subsidiaries;
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    code: row.code ?? null,
+    subsidiaryId: row.subsidiary_id ?? subsidiary?.id ?? null,
+    subsidiaryName: subsidiary?.name ?? null,
+    subsidiaryCode: subsidiary?.code ?? null
+  };
+}
 
 export async function signInWithPassword(email: string, password: string) {
   const supabase = getSupabaseBrowser();
@@ -55,9 +74,15 @@ export async function fetchProfile(userId: string): Promise<ProfileRow | null> {
 
 export async function fetchDepartments(): Promise<DepartmentRow[]> {
   const supabase = getSupabaseBrowser();
+  const rich = await supabase
+    .from("departments")
+    .select("id, name, code, subsidiary_id, subsidiaries(id, name, code, sort_order)")
+    .order("name");
+  if (!rich.error) return (rich.data ?? []).map(mapDepartment);
+
   const { data, error } = await supabase.from("departments").select("id, name").order("name");
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []).map((row) => ({ id: row.id, name: row.name }));
 }
 
 export function profileToSession(profile: ProfileRow) {
@@ -71,12 +96,14 @@ export function profileToSession(profile: ProfileRow) {
   };
 }
 
+function subsidiaryName(value: any) {
+  const nested = Array.isArray(value) ? value[0] : value;
+  return nested?.name as string | undefined;
+}
+
 export async function fetchDailyReports() {
   const supabase = getSupabaseBrowser();
-  const { data, error } = await supabase
-    .from("daily_reports")
-    .select(
-      `
+  const columns = `
       id,
       display_code,
       reporting_date,
@@ -98,17 +125,29 @@ export async function fetchDailyReports() {
       challenges,
       summary,
       submitted_by,
-      departments(name),
+      department_id,
       submitter:profiles!daily_reports_submitted_by_fkey(full_name),
       daily_report_equipment_status(equipment_label)
-    `
-    )
+    `;
+  const rich = await supabase
+    .from("daily_reports")
+    .select(`${columns}, departments(name, subsidiaries(name))`)
     .order("created_at", { ascending: false });
-  if (error) throw error;
-  return (data ?? []).map((row: any) => ({
+  const plain = rich.error
+    ? await supabase
+        .from("daily_reports")
+        .select(`${columns}, departments(name)`)
+        .order("created_at", { ascending: false })
+    : null;
+  const result = plain ?? rich;
+  if (result.error) throw result.error;
+  const data = result.data ?? [];
+  return data.map((row: any) => ({
     id: row.display_code || row.id,
     dbId: row.id as string,
     department: row.departments?.name as string,
+    departmentId: row.department_id as string | undefined,
+    subsidiary: subsidiaryName(row.departments?.subsidiaries),
     submittedBy: row.submitter?.full_name ?? "Unknown",
     date: row.reporting_date as string,
     revenue: Number(row.revenue ?? 0),
@@ -134,27 +173,33 @@ export async function fetchDailyReports() {
 
 export async function fetchApprovalActions() {
   const supabase = getSupabaseBrowser();
-  const { data, error } = await supabase
-    .from("approval_actions")
-    .select(
-      `
+  const columns = `
       id,
       report_id,
       previous_status,
       new_status,
       comment,
       created_at,
-      actor:profiles!approval_actions_actor_id_fkey(full_name),
-      daily_reports(display_code, departments(name))
-    `
-    )
+      actor:profiles!approval_actions_actor_id_fkey(full_name)
+    `;
+  const rich = await supabase
+    .from("approval_actions")
+    .select(`${columns}, daily_reports(display_code, departments(name, subsidiaries(name)))`)
     .order("created_at", { ascending: false });
-  if (error) throw error;
-  return (data ?? []).map((row: any) => ({
+  const plain = rich.error
+    ? await supabase
+        .from("approval_actions")
+        .select(`${columns}, daily_reports(display_code, departments(name))`)
+        .order("created_at", { ascending: false })
+    : null;
+  const result = plain ?? rich;
+  if (result.error) throw result.error;
+  return (result.data ?? []).map((row: any) => ({
     id: row.id as string,
     reportId: (row.daily_reports?.display_code || row.report_id) as string,
     dbReportId: row.report_id as string,
     department: row.daily_reports?.departments?.name as string,
+    subsidiary: subsidiaryName(row.daily_reports?.departments?.subsidiaries),
     actor: row.actor?.full_name ?? "Executive",
     action: statusFromDb[row.new_status as DbReportStatus] as "Pending Chairman Review" | "Approved" | "Returned",
     previousStatus: statusFromDb[row.previous_status as DbReportStatus],
@@ -183,31 +228,44 @@ export async function fetchNotifications() {
 
 export async function fetchLeads() {
   const supabase = getSupabaseBrowser();
-  const { data, error } = await supabase
+  const columns = "id, client, visit_date, proposal, quotation, status";
+  const rich = await supabase
     .from("marketing_leads")
-    .select("id, client, visit_date, proposal, quotation, status, departments:assigned_department_id(name)")
+    .select(`${columns}, departments:assigned_department_id(name, subsidiaries(name))`)
     .order("created_at", { ascending: false });
-  if (error) throw error;
-  return (data ?? []).map((row: any) => ({
+  const plain = rich.error
+    ? await supabase
+        .from("marketing_leads")
+        .select(`${columns}, departments:assigned_department_id(name)`)
+        .order("created_at", { ascending: false })
+    : null;
+  const result = plain ?? rich;
+  if (result.error) throw result.error;
+  return (result.data ?? []).map((row: any) => ({
     id: row.id as string,
     client: row.client as string,
     visitDate: row.visit_date as string,
     proposal: row.proposal as string,
     quotation: Number(row.quotation ?? 0),
-    assignedDepartment: row.departments?.name as string,
+    assignedDepartment: [subsidiaryName(row.departments?.subsidiaries), row.departments?.name].filter(Boolean).join(" · "),
     status: marketingStatusFromDb[row.status as DbMarketingStatus]
   }));
 }
 
 export async function fetchAssets() {
   const supabase = getSupabaseBrowser();
-  const { data, error } = await supabase
+  const columns =
+    "asset_id, name, classification, purchase_date, supplier_name, serial_number, custodian_name, warranty_expiration, maintenance_schedule_interval, location, status, book_value";
+  const rich = await supabase
     .from("assets")
-    .select(
-      "asset_id, name, classification, purchase_date, supplier_name, serial_number, custodian_name, warranty_expiration, maintenance_schedule_interval, location, status, book_value, departments(name)"
-    )
+    .select(`${columns}, departments(name, subsidiaries(name))`)
     .order("created_at", { ascending: false });
-  if (error) throw error;
+  const plain = rich.error
+    ? await supabase.from("assets").select(`${columns}, departments(name)`).order("created_at", { ascending: false })
+    : null;
+  const result = plain ?? rich;
+  if (result.error) throw result.error;
+  const data = result.data;
   return (data ?? []).map((row: any) => ({
     asset_id: row.asset_id as string,
     name: row.name as string,
@@ -215,7 +273,7 @@ export async function fetchAssets() {
     purchase_date: row.purchase_date ?? "",
     supplier_name: row.supplier_name ?? "",
     serial_number: row.serial_number ?? "",
-    department_id: row.departments?.name as string,
+    department_id: [subsidiaryName(row.departments?.subsidiaries), row.departments?.name].filter(Boolean).join(" · "),
     custodian_name: row.custodian_name as string,
     warranty_expiration: row.warranty_expiration ?? "N/A",
     maintenance_schedule_interval: row.maintenance_schedule_interval ?? "",
