@@ -6,7 +6,7 @@ import { fetchDepartments, type DepartmentRow } from "@/lib/ims/data";
 import { leaveRules, type LeaveCode } from "@/lib/ims/leave-rules";
 import { groupBySubsidiary, SubsidiaryDepartmentFields } from "@/app/components/org-select";
 
-type PeoplePage = "Staff Register" | "Leave" | "Letters";
+type PeoplePage = "Staff Register" | "Staff Applications" | "Leave" | "Letters";
 
 type StaffDepartment = {
   id: string;
@@ -97,6 +97,8 @@ export function PeopleOffice({
   const [staff, setStaff] = useState<StaffRow[]>([]);
   const [letters, setLetters] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
+  const [applications, setApplications] = useState<any[]>([]);
+  const [canReviewApplications, setCanReviewApplications] = useState(false);
 
   async function load() {
     const headers = await authHeaders();
@@ -121,6 +123,13 @@ export function PeopleOffice({
       if (!response.ok) throw new Error(payload.error || "Failed to load leave");
       setRequests(payload.requests ?? []);
     }
+    if (page === "Staff Applications") {
+      const response = await fetch("/api/apply/review", { headers });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Failed to load applications");
+      setApplications(payload.applications ?? []);
+      setCanReviewApplications(Boolean(payload.canReview));
+    }
   }
 
   useEffect(() => {
@@ -133,7 +142,9 @@ export function PeopleOffice({
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-800">People</p>
         <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{page}</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-          Staff numbers use the department and the year, for example TAN/EMP/ICT/2026/001. A number can be given to a new employee after the previous holder is marked resigned, retired, or dismissed.
+          {page === "Staff Applications"
+            ? "Public submissions from /apply. HR and Director of Administration verify records. Staff ID is issued only on approval."
+            : "Staff numbers use the department and the year, for example TAN/EMP/ICT/2026/001. A number can be given to a new employee after the previous holder is marked resigned, retired, or dismissed."}
         </p>
       </div>
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
@@ -143,6 +154,18 @@ export function PeopleOffice({
           staff={staff}
           departments={departments}
           canWrite={canWritePeople}
+          onSaved={async (message) => {
+            setNotice(message);
+            setError("");
+            await load();
+          }}
+          onError={setError}
+        />
+      )}
+      {page === "Staff Applications" && (
+        <ApplicationsPanel
+          applications={applications}
+          canReview={canReviewApplications}
           onSaved={async (message) => {
             setNotice(message);
             setError("");
@@ -396,6 +419,185 @@ function StaffRegister({
             <button type="submit" disabled={busy} className="primary-button disabled:opacity-60">Store on personnel file</button>
           </div>
         </form>
+      )}
+    </div>
+  );
+}
+
+function ApplicationsPanel({
+  applications,
+  canReview,
+  onSaved,
+  onError
+}: {
+  applications: any[];
+  canReview: boolean;
+  onSaved: (message: string) => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [selectedId, setSelectedId] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const selected = applications.find((item) => item.id === selectedId) ?? null;
+
+  async function decide(decision: "approve" | "reject" | "under_review") {
+    if (!selected) return;
+    setBusy(true);
+    onError("");
+    try {
+      const headers = await authHeaders();
+      const response = await fetch("/api/apply/review", {
+        method: "PATCH",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          applicationId: selected.id,
+          decision,
+          reviewNote: note || null
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Review failed");
+      setNote("");
+      if (decision === "approve") {
+        await onSaved(payload.message || `${selected.full_name} approved.`);
+      } else if (decision === "reject") {
+        await onSaved(`${selected.full_name} rejected.`);
+      } else {
+        await onSaved(`${selected.full_name} marked under review.`);
+      }
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Review failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="overflow-x-auto rounded-3xl border border-slate-200">
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-4 py-3">Reference</th>
+              <th className="px-4 py-3">Name</th>
+              <th className="px-4 py-3">Placement</th>
+              <th className="px-4 py-3">Role</th>
+              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">Staff ID</th>
+            </tr>
+          </thead>
+          <tbody>
+            {applications.map((item) => (
+              <tr
+                key={item.id}
+                className={`cursor-pointer border-t border-slate-100 ${selectedId === item.id ? "bg-blue-50" : "hover:bg-slate-50"}`}
+                onClick={() => setSelectedId(item.id)}
+              >
+                <td className="px-4 py-3 font-medium text-slate-950">{item.reference_code}</td>
+                <td className="px-4 py-3">{item.full_name}</td>
+                <td className="px-4 py-3">{departmentLabel(item.departments)}</td>
+                <td className="px-4 py-3">{titleCase(item.proposed_ims_role)}</td>
+                <td className="px-4 py-3">{titleCase(item.status)}</td>
+                <td className="px-4 py-3">{item.staff?.staff_number ?? "—"}</td>
+              </tr>
+            ))}
+            {!applications.length && (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                  No applications yet. Share https://ims.tanjuriel.com/apply with staff.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {selected && (
+        <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 lg:grid-cols-[1.4fr_1fr]">
+          <div className="space-y-3 text-sm text-slate-700">
+            <h3 className="text-lg font-semibold text-slate-950">{selected.full_name}</h3>
+            <p>
+              {selected.preferred_name ? `Preferred: ${selected.preferred_name} · ` : ""}
+              {selected.sex} · DOB {selected.date_of_birth} · {selected.nationality}
+            </p>
+            <p>
+              {selected.phone} · {selected.personal_email}
+              {selected.work_email ? ` · ${selected.work_email}` : ""}
+            </p>
+            <p>{selected.home_address}</p>
+            <p>
+              Next of kin: {selected.next_of_kin_name} ({selected.next_of_kin_phone})
+            </p>
+            <p>
+              {titleCase(selected.staff_type)} · {titleCase(selected.employment_type)} · {titleCase(selected.employment_status)} · joined{" "}
+              {selected.start_date}
+            </p>
+            <p>
+              {selected.job_title} · IMS role {titleCase(selected.proposed_ims_role)}
+              {selected.reports_to_name ? ` · reports to ${selected.reports_to_name}` : ""}
+              {selected.work_location ? ` · ${selected.work_location}` : ""}
+            </p>
+            <p>
+              ID: {titleCase(selected.government_id_type)} {selected.government_id_number}
+              {selected.nin ? ` · NIN ${selected.nin}` : ""}
+              {selected.bvn ? ` · BVN ${selected.bvn}` : ""}
+            </p>
+            {(selected.bank_name || selected.bank_account) && (
+              <p>Bank: {[selected.bank_name, selected.bank_account].filter(Boolean).join(" · ")}</p>
+            )}
+            <p>
+              Biometric: {titleCase(selected.biometric_method)} · ready {selected.biometric_ready ? "Yes" : "No"}
+              {selected.biometric_note ? ` · ${selected.biometric_note}` : ""}
+            </p>
+            <div className="flex flex-wrap gap-3 pt-2">
+              {selected.photograph_url && (
+                <a href={selected.photograph_url} target="_blank" rel="noreferrer" className="secondary-button">
+                  Photo
+                </a>
+              )}
+              {selected.id_document_url && (
+                <a href={selected.id_document_url} target="_blank" rel="noreferrer" className="secondary-button">
+                  ID document
+                </a>
+              )}
+              {selected.cv_url && (
+                <a href={selected.cv_url} target="_blank" rel="noreferrer" className="secondary-button">
+                  CV
+                </a>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {canReview && !["approved", "rejected"].includes(selected.status) ? (
+              <>
+                <label className="block">
+                  <span className="field-label">Review note</span>
+                  <textarea value={note} onChange={(event) => setNote(event.target.value)} className="form-control min-h-24" />
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" disabled={busy} className="primary-button disabled:opacity-60" onClick={() => decide("approve")}>
+                    Approve & issue Staff ID
+                  </button>
+                  <button type="button" disabled={busy} className="secondary-button disabled:opacity-60" onClick={() => decide("under_review")}>
+                    Mark under review
+                  </button>
+                  <button type="button" disabled={busy} className="secondary-button disabled:opacity-60" onClick={() => decide("reject")}>
+                    Reject
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                {selected.status === "approved"
+                  ? `Approved. Staff ID ${selected.staff?.staff_number ?? "issued"}.`
+                  : selected.status === "rejected"
+                    ? `Rejected${selected.review_note ? `: ${selected.review_note}` : "."}`
+                    : "You can view this application. Only HR or Director of Administration can decide."}
+              </p>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

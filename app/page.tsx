@@ -55,6 +55,7 @@ type PageId =
   | "Quotations"
   | "Lead Assignment"
   | "Staff Register"
+  | "Staff Applications"
   | "Leave"
   | "Letters"
   | "Admin Dashboard"
@@ -227,12 +228,12 @@ const departments: Department[] = [
 
 
 const rolePages: Record<Role, PageId[]> = {
-  chairman: ["Executive Dashboard", "Approval Queue", "Department Reports", "Staff Register", "Leave", "Letters", "Assets", "Users"],
-  "managing-director": ["Staff Register", "Leave", "Letters"],
+  chairman: ["Executive Dashboard", "Approval Queue", "Department Reports", "Staff Register", "Staff Applications", "Leave", "Letters", "Assets", "Users"],
+  "managing-director": ["Staff Register", "Staff Applications", "Leave", "Letters"],
   "executive-director": ["Leave", "Directorate KPIs", "Staff Register"],
-  "general-manager": ["Operations Overview", "Department Compliance", "Exceptions", "Marketing Pipeline", "Staff Register", "Assets", "Users"],
-  "director-of-administration": ["Admin Dashboard", "Directorate KPIs", "Staff Register", "Leave", "Letters", "Users"],
-  "human-resources": ["Staff Register", "Leave", "Letters"],
+  "general-manager": ["Operations Overview", "Department Compliance", "Exceptions", "Marketing Pipeline", "Staff Register", "Staff Applications", "Assets", "Users"],
+  "director-of-administration": ["Admin Dashboard", "Directorate KPIs", "Staff Register", "Staff Applications", "Leave", "Letters", "Users"],
+  "human-resources": ["Staff Register", "Staff Applications", "Leave", "Letters"],
   "department-head": ["Daily Submission", "My Reports", "Returned Items", "Directorate KPIs"],
   manager: ["Daily Submission", "My Reports", "Returned Items", "Directorate KPIs"],
   "marketing-officer": ["Client Visits", "Proposals", "Quotations", "Lead Assignment"]
@@ -974,7 +975,8 @@ export default function Home() {
             {session.role === "general-manager" &&
               activePage !== "Users" &&
               activePage !== "Assets" &&
-              activePage !== "Staff Register" && (
+              activePage !== "Staff Register" &&
+              activePage !== "Staff Applications" && (
               <GeneralManagerDashboard
                 activePage={activePage}
                 submissions={submissions}
@@ -1018,7 +1020,7 @@ export default function Home() {
                 departmentId={session.departmentId}
               />
             )}
-            {(activePage === "Staff Register" || activePage === "Leave" || activePage === "Letters") && (
+            {(activePage === "Staff Register" || activePage === "Staff Applications" || activePage === "Leave" || activePage === "Letters") && (
               <PeopleOffice
                 page={activePage}
                 role={session.role}
