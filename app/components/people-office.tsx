@@ -440,6 +440,11 @@ function ApplicationsPanel({
   const [busy, setBusy] = useState(false);
   const selected = applications.find((item) => item.id === selectedId) ?? null;
 
+  function closePopup() {
+    setSelectedId("");
+    setNote("");
+  }
+
   async function decide(decision: "approve" | "reject" | "under_review") {
     if (!selected) return;
     setBusy(true);
@@ -457,7 +462,7 @@ function ApplicationsPanel({
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Review failed");
-      setNote("");
+      closePopup();
       if (decision === "approve") {
         await onSaved(payload.message || `${selected.full_name} approved.`);
       } else if (decision === "reject") {
@@ -490,8 +495,11 @@ function ApplicationsPanel({
             {applications.map((item) => (
               <tr
                 key={item.id}
-                className={`cursor-pointer border-t border-slate-100 ${selectedId === item.id ? "bg-blue-50" : "hover:bg-slate-50"}`}
-                onClick={() => setSelectedId(item.id)}
+                className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
+                onClick={() => {
+                  setSelectedId(item.id);
+                  setNote("");
+                }}
               >
                 <td className="px-4 py-3 font-medium text-slate-950">{item.reference_code}</td>
                 <td className="px-4 py-3">{item.full_name}</td>
@@ -513,91 +521,125 @@ function ApplicationsPanel({
       </div>
 
       {selected && (
-        <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 lg:grid-cols-[1.4fr_1fr]">
-          <div className="space-y-3 text-sm text-slate-700">
-            <h3 className="text-lg font-semibold text-slate-950">{selected.full_name}</h3>
-            <p>
-              {selected.preferred_name ? `Preferred: ${selected.preferred_name} · ` : ""}
-              {selected.sex} · DOB {selected.date_of_birth} · {selected.nationality}
-            </p>
-            <p>
-              {selected.phone} · {selected.personal_email}
-              {selected.work_email ? ` · ${selected.work_email}` : ""}
-            </p>
-            <p>{selected.home_address}</p>
-            <p>
-              Next of kin: {selected.next_of_kin_name} ({selected.next_of_kin_phone})
-            </p>
-            <p>
-              {titleCase(selected.staff_type)} · {titleCase(selected.employment_type)} · {titleCase(selected.employment_status)} · joined{" "}
-              {selected.start_date}
-            </p>
-            <p>
-              {selected.job_title} · IMS role {titleCase(selected.proposed_ims_role)}
-              {selected.reports_to_name ? ` · reports to ${selected.reports_to_name}` : ""}
-              {selected.work_location ? ` · ${selected.work_location}` : ""}
-            </p>
-            <p>
-              ID type: {titleCase(selected.government_id_type)}
-              {selected.government_id_number ? ` · ${selected.government_id_number}` : ""}
-              {selected.nin ? ` · NIN ${selected.nin}` : ""}
-              {selected.bvn ? ` · BVN ${selected.bvn}` : ""}
-            </p>
-            {(selected.bank_name || selected.bank_account) && (
-              <p>Bank: {[selected.bank_name, selected.bank_account].filter(Boolean).join(" · ")}</p>
-            )}
-            <p>
-              Biometric: {titleCase(selected.biometric_method)} · ready {selected.biometric_ready ? "Yes" : "No"}
-              {selected.biometric_note ? ` · ${selected.biometric_note}` : ""}
-            </p>
-            <div className="flex flex-wrap gap-3 pt-2">
-              {selected.photograph_url && (
-                <a href={selected.photograph_url} target="_blank" rel="noreferrer" className="secondary-button">
-                  Photo
-                </a>
-              )}
-              {selected.id_document_url && (
-                <a href={selected.id_document_url} target="_blank" rel="noreferrer" className="secondary-button">
-                  ID document
-                </a>
-              )}
-              {selected.cv_url && (
-                <a href={selected.cv_url} target="_blank" rel="noreferrer" className="secondary-button">
-                  CV
-                </a>
-              )}
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/45 px-3 py-3 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6"
+          onClick={closePopup}
+          role="presentation"
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="staff-application-title"
+            onClick={(event) => event.stopPropagation()}
+            className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl sm:rounded-3xl"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-blue-800">Staff application</p>
+                <h3 id="staff-application-title" className="mt-1 truncate text-lg font-semibold tracking-tight text-slate-950">
+                  {selected.full_name}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  {selected.reference_code} · {titleCase(selected.status)}
+                  {selected.staff?.staff_number ? ` · ${selected.staff.staff_number}` : ""}
+                </p>
+              </div>
+              <button type="button" onClick={closePopup} className="secondary-button shrink-0 px-3 py-2 text-xs sm:text-sm">
+                Close
+              </button>
             </div>
-          </div>
 
-          <div className="space-y-3">
-            {canReview && !["approved", "rejected"].includes(selected.status) ? (
-              <>
-                <label className="block">
-                  <span className="field-label">Review note</span>
-                  <textarea value={note} onChange={(event) => setNote(event.target.value)} className="form-control min-h-24" />
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" disabled={busy} className="primary-button disabled:opacity-60" onClick={() => decide("approve")}>
-                    Approve & issue Staff ID
-                  </button>
-                  <button type="button" disabled={busy} className="secondary-button disabled:opacity-60" onClick={() => decide("under_review")}>
-                    Mark under review
-                  </button>
-                  <button type="button" disabled={busy} className="secondary-button disabled:opacity-60" onClick={() => decide("reject")}>
-                    Reject
-                  </button>
+            <div className="overflow-y-auto px-5 py-4">
+              <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
+                <div className="space-y-3 text-sm text-slate-700">
+                  <p>
+                    {selected.preferred_name ? `Preferred: ${selected.preferred_name} · ` : ""}
+                    {selected.sex} · DOB {selected.date_of_birth} · {selected.nationality}
+                  </p>
+                  <p>
+                    {selected.phone} · {selected.personal_email}
+                    {selected.work_email ? ` · ${selected.work_email}` : ""}
+                  </p>
+                  <p>{selected.home_address}</p>
+                  <p>
+                    Next of kin: {selected.next_of_kin_name} ({selected.next_of_kin_phone})
+                  </p>
+                  <p>
+                    {titleCase(selected.staff_type)} · {titleCase(selected.employment_type)} · {titleCase(selected.employment_status)} · joined{" "}
+                    {selected.start_date}
+                  </p>
+                  <p>
+                    {departmentLabel(selected.departments)}
+                  </p>
+                  <p>
+                    {selected.job_title} · IMS role {titleCase(selected.proposed_ims_role)}
+                    {selected.reports_to_name ? ` · reports to ${selected.reports_to_name}` : ""}
+                    {selected.work_location ? ` · ${selected.work_location}` : ""}
+                  </p>
+                  <p>
+                    ID type: {titleCase(selected.government_id_type)}
+                    {selected.government_id_number ? ` · ${selected.government_id_number}` : ""}
+                    {selected.nin ? ` · NIN ${selected.nin}` : ""}
+                    {selected.bvn ? ` · BVN ${selected.bvn}` : ""}
+                  </p>
+                  {(selected.bank_name || selected.bank_account) && (
+                    <p>Bank: {[selected.bank_name, selected.bank_account].filter(Boolean).join(" · ")}</p>
+                  )}
+                  <p>
+                    Biometric: {titleCase(selected.biometric_method)} · ready {selected.biometric_ready ? "Yes" : "No"}
+                    {selected.biometric_note ? ` · ${selected.biometric_note}` : ""}
+                  </p>
+                  <div className="flex flex-wrap gap-3 pt-1">
+                    {selected.photograph_url && (
+                      <a href={selected.photograph_url} target="_blank" rel="noreferrer" className="secondary-button">
+                        Photo
+                      </a>
+                    )}
+                    {selected.id_document_url && (
+                      <a href={selected.id_document_url} target="_blank" rel="noreferrer" className="secondary-button">
+                        ID document
+                      </a>
+                    )}
+                    {selected.cv_url && (
+                      <a href={selected.cv_url} target="_blank" rel="noreferrer" className="secondary-button">
+                        CV
+                      </a>
+                    )}
+                  </div>
                 </div>
-              </>
-            ) : (
-              <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                {selected.status === "approved"
-                  ? `Approved. Staff ID ${selected.staff?.staff_number ?? "issued"}.`
-                  : selected.status === "rejected"
-                    ? `Rejected${selected.review_note ? `: ${selected.review_note}` : "."}`
-                    : "You can view this application. Only HR or Director of Administration can decide."}
-              </p>
-            )}
-          </div>
+
+                <div className="space-y-3">
+                  {canReview && !["approved", "rejected"].includes(selected.status) ? (
+                    <>
+                      <label className="block">
+                        <span className="field-label">Review note</span>
+                        <textarea value={note} onChange={(event) => setNote(event.target.value)} className="form-control min-h-24" />
+                      </label>
+                      <div className="flex flex-col gap-2">
+                        <button type="button" disabled={busy} className="primary-button disabled:opacity-60" onClick={() => decide("approve")}>
+                          Approve & issue Staff ID
+                        </button>
+                        <button type="button" disabled={busy} className="secondary-button disabled:opacity-60" onClick={() => decide("under_review")}>
+                          Mark under review
+                        </button>
+                        <button type="button" disabled={busy} className="secondary-button disabled:opacity-60" onClick={() => decide("reject")}>
+                          Reject
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                      {selected.status === "approved"
+                        ? `Approved. Staff ID ${selected.staff?.staff_number ?? "issued"}.`
+                        : selected.status === "rejected"
+                          ? `Rejected${selected.review_note ? `: ${selected.review_note}` : "."}`
+                          : "You can view this application. Only HR or Director of Administration can decide."}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
       )}
     </div>
