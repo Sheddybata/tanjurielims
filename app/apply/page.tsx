@@ -9,6 +9,7 @@ import {
   APPLY_ID_TYPES,
   APPLY_IMS_ROLES
 } from "@/lib/ims/apply";
+import { compressImageFile, formatFileSize } from "@/lib/ims/compress-image";
 import { SubsidiaryDepartmentFields, type OrgDepartment } from "@/app/components/org-select";
 
 type DeptOption = OrgDepartment;
@@ -46,8 +47,22 @@ export default function StaffApplyPage() {
 
     try {
       const response = await fetch("/api/apply", { method: "POST", body });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Submission failed");
+      const raw = await response.text();
+      let payload: any = null;
+      try {
+        payload = raw ? JSON.parse(raw) : null;
+      } catch {
+        if (response.status === 413) {
+          throw new Error("Photos are too large for upload. Retake or upload a smaller image, then try again.");
+        }
+        throw new Error(raw.trim().slice(0, 160) || `Submission failed (${response.status})`);
+      }
+      if (!response.ok) {
+        if (response.status === 413) {
+          throw new Error("Photos are too large for upload. Retake or upload a smaller image, then try again.");
+        }
+        throw new Error(payload?.error || "Submission failed");
+      }
       setDone({
         reference: payload.application.reference_code,
         message: payload.message
@@ -178,7 +193,7 @@ export default function StaffApplyPage() {
                 <Field label="Enrollment note / preference (optional)" name="biometricNote" className="md:col-span-2" />
               </Section>
 
-              <Section title="F. Uploads" subtitle="Take a photo with your camera or upload a file. Passport photo is required. ID document is optional. Max 5MB each.">
+              <Section title="F. Uploads" subtitle="Take a photo with your camera or upload a file. Passport photo is required. ID document is optional. Photos are compressed automatically.">
                 <CameraOrUploadField
                   key={`photograph-${uploadKey}`}
                   label="Passport photograph"
@@ -333,6 +348,7 @@ function CameraOrUploadField({
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [starting, setStarting] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [facingMode, setFacingMode] = useState<"user" | "environment">(defaultFacingMode);
 
   function releaseStream() {
@@ -361,12 +377,25 @@ function CameraOrUploadField({
 
   function assignFile(file: File) {
     setInputFile(fileInputRef.current, file);
-    setFileName(file.name);
+    setFileName(`${file.name} (${formatFileSize(file.size)})`);
     setPreviewUrl((current) => {
       if (current) URL.revokeObjectURL(current);
       return file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
     });
     setCameraError("");
+  }
+
+  async function assignImage(file: File) {
+    setProcessing(true);
+    setCameraError("");
+    try {
+      const compressed = file.type.startsWith("image/") ? await compressImageFile(file) : file;
+      assignFile(compressed);
+    } catch (err) {
+      setCameraError(err instanceof Error ? err.message : "Could not process this image");
+    } finally {
+      setProcessing(false);
+    }
   }
 
   async function startStream(nextFacing: "user" | "environment") {
@@ -419,25 +448,29 @@ function CameraOrUploadField({
       return;
     }
 
+    const maxEdge = 1280;
+    const scale = Math.min(1, maxEdge / Math.max(video.videoWidth, video.videoHeight));
+    const width = Math.max(1, Math.round(video.videoWidth * scale));
+    const height = Math.max(1, Math.round(video.videoHeight * scale));
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = width;
+    canvas.height = height;
     const context = canvas.getContext("2d");
     if (!context) {
       setCameraError("Could not capture this frame.");
       return;
     }
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    context.drawImage(video, 0, 0, width, height);
 
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.8));
     if (!blob) {
       setCameraError("Could not save the photo.");
       return;
     }
 
     const file = new File([blob], `${name}-${Date.now()}.jpg`, { type: "image/jpeg" });
-    assignFile(file);
     stopCamera();
+    await assignImage(file);
   }
 
   function clearFile() {
@@ -470,24 +503,25 @@ function CameraOrUploadField({
             clearFile();
             return;
           }
-          assignFile(file);
+          void assignImage(file);
         }}
       />
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="primary-button" onClick={openCamera} disabled={starting}>
+        <button type="button" className="primary-button" onClick={openCamera} disabled={starting || processing}>
           {starting ? "Opening camera..." : "Take photo"}
         </button>
-        <button type="button" className="secondary-button" onClick={() => fileInputRef.current?.click()}>
+        <button type="button" className="secondary-button" onClick={() => fileInputRef.current?.click()} disabled={processing}>
           Upload file
         </button>
         {fileName && (
-          <button type="button" className="secondary-button" onClick={clearFile}>
+          <button type="button" className="secondary-button" onClick={clearFile} disabled={processing}>
             Clear
           </button>
         )}
       </div>
 
+      {processing && <p className="text-sm text-slate-600">Compressing photo...</p>}
       {cameraError && <p className="text-sm text-red-700">{cameraError}</p>}
       {fileName && <p className="text-sm text-slate-600">Selected: {fileName}</p>}
 

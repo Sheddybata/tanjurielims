@@ -8,14 +8,14 @@ import {
 
 export const runtime = "nodejs";
 
-const MAX_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_FILE_BYTES = 1.5 * 1024 * 1024;
 
 function assertFile(file: File | null, label: string, required = false) {
   if (!file || file.size === 0) {
     if (required) throw new Error(`${label} is required`);
     return null;
   }
-  if (file.size > MAX_FILE_BYTES) throw new Error(`${label} must be 5MB or smaller`);
+  if (file.size > MAX_FILE_BYTES) throw new Error(`${label} must be 1.5MB or smaller`);
   return file;
 }
 
