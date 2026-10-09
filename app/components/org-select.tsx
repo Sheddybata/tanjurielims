@@ -9,7 +9,7 @@ export type OrgDepartment = {
   subsidiaryCode?: string | null;
 };
 
-const subsidiaryOrder = ["HQ", "ADM", "TECH", "EDU", "FRM", "BIF", "CON", "MED", "LEG"];
+const subsidiaryOrder = ["HQ", "ADM", "TECH", "EDU", "FRM", "BIF", "CON", "MED", "LEG", "TSI"];
 
 export function groupBySubsidiary(departments: OrgDepartment[]) {
   const groups = new Map<string, { id: string; name: string; code: string; departments: OrgDepartment[] }>();
