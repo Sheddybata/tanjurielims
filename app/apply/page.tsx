@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import {
   APPLY_BIOMETRIC_METHODS,
   APPLY_EMPLOYMENT_STATUSES,
@@ -21,6 +21,7 @@ export default function StaffApplyPage() {
   const [error, setError] = useState("");
   const [done, setDone] = useState<{ reference: string; message: string } | null>(null);
   const [loadError, setLoadError] = useState("");
+  const [uploadKey, setUploadKey] = useState(0);
 
   useEffect(() => {
     fetch("/api/apply/options")
@@ -54,6 +55,7 @@ export default function StaffApplyPage() {
       form.reset();
       setSubsidiaryId("");
       setDepartmentId("");
+      setUploadKey((value) => value + 1);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Submission failed");
@@ -177,10 +179,25 @@ export default function StaffApplyPage() {
                 <Field label="Enrollment note / preference (optional)" name="biometricNote" className="md:col-span-2" />
               </Section>
 
-              <Section title="F. Uploads" subtitle="Passport photo and ID document are required. Max 5MB each.">
-                <FileField label="Passport photograph" name="photograph" accept="image/*" required />
-                <FileField label="ID document" name="idDocument" accept="image/*,.pdf" required />
-                <FileField label="CV (optional)" name="cv" accept=".pdf,.doc,.docx,image/*" />
+              <Section title="F. Uploads" subtitle="Take a photo with your camera or upload a file. Passport photo and ID are required. Max 5MB each.">
+                <CameraOrUploadField
+                  key={`photograph-${uploadKey}`}
+                  label="Passport photograph"
+                  name="photograph"
+                  required
+                  facingMode="user"
+                  hint="Use the front camera for a clear face photo."
+                />
+                <CameraOrUploadField
+                  key={`idDocument-${uploadKey}`}
+                  label="ID document"
+                  name="idDocument"
+                  required
+                  facingMode="environment"
+                  acceptUpload="image/*,.pdf"
+                  hint="Use the rear camera to photograph your ID, or upload a scan."
+                />
+                <FileField key={`cv-${uploadKey}`} label="CV (optional)" name="cv" accept=".pdf,.doc,.docx,image/*" />
               </Section>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -284,5 +301,206 @@ function FileField({
       <span className="field-label">{label}</span>
       <input name={name} type="file" accept={accept} required={required} className="form-control" />
     </label>
+  );
+}
+
+function setInputFile(input: HTMLInputElement | null, file: File | null) {
+  if (!input) return;
+  const transfer = new DataTransfer();
+  if (file) transfer.items.add(file);
+  input.files = transfer.files;
+}
+
+function CameraOrUploadField({
+  label,
+  name,
+  required,
+  facingMode,
+  acceptUpload = "image/*",
+  hint
+}: {
+  label: string;
+  name: string;
+  required?: boolean;
+  facingMode: "user" | "environment";
+  acceptUpload?: string;
+  hint?: string;
+}) {
+  const inputId = useId();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [fileName, setFileName] = useState("");
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+  const [starting, setStarting] = useState(false);
+
+  function stopCamera() {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraOpen(false);
+    setStarting(false);
+  }
+
+  useEffect(() => {
+    return () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  function assignFile(file: File) {
+    setInputFile(fileInputRef.current, file);
+    setFileName(file.name);
+    setPreviewUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+    });
+    setCameraError("");
+  }
+
+  async function openCamera() {
+    setCameraError("");
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError("Camera is not available in this browser. Use Upload instead.");
+      fileInputRef.current?.click();
+      return;
+    }
+
+    setStarting(true);
+    setCameraOpen(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: facingMode },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+    } catch {
+      stopCamera();
+      setCameraError("Could not open the camera. Allow camera access, or use Upload.");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  async function capturePhoto() {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) {
+      setCameraError("Camera is still starting. Wait a moment, then try again.");
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setCameraError("Could not capture this frame.");
+      return;
+    }
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    if (!blob) {
+      setCameraError("Could not save the photo.");
+      return;
+    }
+
+    const file = new File([blob], `${name}-${Date.now()}.jpg`, { type: "image/jpeg" });
+    assignFile(file);
+    stopCamera();
+  }
+
+  function clearFile() {
+    setInputFile(fileInputRef.current, null);
+    setFileName("");
+    setPreviewUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return null;
+    });
+  }
+
+  return (
+    <div className="block space-y-3 md:col-span-1">
+      <div>
+        <span className="field-label">{label}</span>
+        {hint && <p className="mb-2 text-xs leading-5 text-slate-500">{hint}</p>}
+      </div>
+
+      <input
+        ref={fileInputRef}
+        id={inputId}
+        name={name}
+        type="file"
+        accept={acceptUpload}
+        required={required}
+        className="sr-only"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (!file) {
+            clearFile();
+            return;
+          }
+          assignFile(file);
+        }}
+      />
+
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="primary-button" onClick={openCamera} disabled={starting}>
+          {starting ? "Opening camera..." : "Take photo"}
+        </button>
+        <button type="button" className="secondary-button" onClick={() => fileInputRef.current?.click()}>
+          Upload file
+        </button>
+        {fileName && (
+          <button type="button" className="secondary-button" onClick={clearFile}>
+            Clear
+          </button>
+        )}
+      </div>
+
+      {cameraError && <p className="text-sm text-red-700">{cameraError}</p>}
+      {fileName && <p className="text-sm text-slate-600">Selected: {fileName}</p>}
+
+      {previewUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={previewUrl} alt={`${label} preview`} className="h-40 w-full rounded-2xl border border-slate-200 object-cover" />
+      )}
+
+      {cameraOpen && (
+        <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-950 p-3 text-white">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className={`h-56 w-full rounded-xl bg-black object-cover ${facingMode === "user" ? "scale-x-[-1]" : ""}`}
+          />
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="primary-button" onClick={capturePhoto} disabled={starting}>
+              Capture
+            </button>
+            <button type="button" className="secondary-button" onClick={stopCamera}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
