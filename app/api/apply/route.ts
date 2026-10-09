@@ -65,7 +65,6 @@ export async function POST(request: NextRequest) {
     const workLocation = optionalString(form.get("workLocation"));
 
     const governmentIdType = requiredString(form.get("governmentIdType"), "Means of ID type");
-    const governmentIdNumber = requiredString(form.get("governmentIdNumber"), "Means of ID number");
     const nin = optionalString(form.get("nin"));
     const bvn = optionalString(form.get("bvn"));
     const bankName = optionalString(form.get("bankName"));
@@ -97,7 +96,7 @@ export async function POST(request: NextRequest) {
     }
 
     const photograph = assertFile(form.get("photograph") as File | null, "Passport photograph", true);
-    const idDocument = assertFile(form.get("idDocument") as File | null, "ID document", true);
+    const idDocument = assertFile(form.get("idDocument") as File | null, "ID document", false);
     const cv = assertFile(form.get("cv") as File | null, "CV", false);
 
     const { data: department, error: departmentError } = await admin
@@ -111,7 +110,7 @@ export async function POST(request: NextRequest) {
 
     const reference = generateApplicationReference();
     const photographPath = await uploadApplicationFile(admin, reference, "photo", photograph!);
-    const idDocumentPath = await uploadApplicationFile(admin, reference, "id", idDocument!);
+    const idDocumentPath = idDocument ? await uploadApplicationFile(admin, reference, "id", idDocument) : null;
     const cvPath = cv ? await uploadApplicationFile(admin, reference, "cv", cv) : null;
 
     const { data, error } = await admin
@@ -141,7 +140,7 @@ export async function POST(request: NextRequest) {
         work_location: workLocation,
         start_date: startDate,
         government_id_type: governmentIdType,
-        government_id_number: governmentIdNumber,
+        government_id_number: null,
         nin,
         bvn,
         bank_name: bankName,

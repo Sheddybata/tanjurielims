@@ -538,7 +538,8 @@ function ApplicationsPanel({
               {selected.work_location ? ` · ${selected.work_location}` : ""}
             </p>
             <p>
-              ID: {titleCase(selected.government_id_type)} {selected.government_id_number}
+              ID type: {titleCase(selected.government_id_type)}
+              {selected.government_id_number ? ` · ${selected.government_id_number}` : ""}
               {selected.nin ? ` · NIN ${selected.nin}` : ""}
               {selected.bvn ? ` · BVN ${selected.bvn}` : ""}
             </p>

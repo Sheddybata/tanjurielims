@@ -191,7 +191,7 @@ export async function PATCH(request: NextRequest) {
       next_of_kin_name: application.next_of_kin_name,
       next_of_kin_phone: application.next_of_kin_phone,
       government_id_type: application.government_id_type,
-      government_id_number: application.government_id_number,
+      government_id_number: application.government_id_number || "pending",
       nin: application.nin,
       bvn: application.bvn,
       bank_name: application.bank_name,

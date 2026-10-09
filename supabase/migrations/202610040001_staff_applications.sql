@@ -93,7 +93,7 @@ create table if not exists public.staff_applications (
   work_location text,
   start_date date not null,
   government_id_type text not null,
-  government_id_number text not null,
+  government_id_number text,
   nin text,
   bvn text,
   bank_name text,

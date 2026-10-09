@@ -143,7 +143,6 @@ export default function StaffApplyPage() {
 
               <Section title="C. Official IDs" subtitle="Used for verification. Handle carefully.">
                 <Select label="Means of ID type" name="governmentIdType" required options={[...APPLY_ID_TYPES]} />
-                <Field label="Means of ID number" name="governmentIdNumber" required />
                 <Field label="NIN" name="nin" />
                 <Field label="BVN (optional)" name="bvn" />
                 <Field label="Bank name (optional)" name="bankName" />
@@ -179,7 +178,7 @@ export default function StaffApplyPage() {
                 <Field label="Enrollment note / preference (optional)" name="biometricNote" className="md:col-span-2" />
               </Section>
 
-              <Section title="F. Uploads" subtitle="Take a photo with your camera or upload a file. Passport photo and ID are required. Max 5MB each.">
+              <Section title="F. Uploads" subtitle="Take a photo with your camera or upload a file. Passport photo is required. ID document is optional. Max 5MB each.">
                 <CameraOrUploadField
                   key={`photograph-${uploadKey}`}
                   label="Passport photograph"
@@ -190,12 +189,11 @@ export default function StaffApplyPage() {
                 />
                 <CameraOrUploadField
                   key={`idDocument-${uploadKey}`}
-                  label="ID document"
+                  label="ID document (optional)"
                   name="idDocument"
-                  required
                   facingMode="environment"
                   acceptUpload="image/*,.pdf"
-                  hint="Use the rear camera to photograph your ID, or upload a scan."
+                  hint="Optional. Use the rear camera to photograph your ID, or upload a scan."
                 />
                 <FileField key={`cv-${uploadKey}`} label="CV (optional)" name="cv" accept=".pdf,.doc,.docx,image/*" />
               </Section>
