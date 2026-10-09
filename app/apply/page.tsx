@@ -184,16 +184,16 @@ export default function StaffApplyPage() {
                   label="Passport photograph"
                   name="photograph"
                   required
-                  facingMode="user"
-                  hint="Use the front camera for a clear face photo."
+                  defaultFacingMode="user"
+                  hint="Start with the front camera for a clear face photo. You can switch to back camera anytime."
                 />
                 <CameraOrUploadField
                   key={`idDocument-${uploadKey}`}
                   label="ID document (optional)"
                   name="idDocument"
-                  facingMode="environment"
+                  defaultFacingMode="environment"
                   acceptUpload="image/*,.pdf"
-                  hint="Optional. Use the rear camera to photograph your ID, or upload a scan."
+                  hint="Optional. Start with the back camera for your ID, or switch to front. You can also upload a scan."
                 />
                 <FileField key={`cv-${uploadKey}`} label="CV (optional)" name="cv" accept=".pdf,.doc,.docx,image/*" />
               </Section>
@@ -313,14 +313,14 @@ function CameraOrUploadField({
   label,
   name,
   required,
-  facingMode,
+  defaultFacingMode,
   acceptUpload = "image/*",
   hint
 }: {
   label: string;
   name: string;
   required?: boolean;
-  facingMode: "user" | "environment";
+  defaultFacingMode: "user" | "environment";
   acceptUpload?: string;
   hint?: string;
 }) {
@@ -333,11 +333,16 @@ function CameraOrUploadField({
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [starting, setStarting] = useState(false);
+  const [facingMode, setFacingMode] = useState<"user" | "environment">(defaultFacingMode);
 
-  function stopCamera() {
+  function releaseStream() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
+  }
+
+  function stopCamera() {
+    releaseStream();
     setCameraOpen(false);
     setStarting(false);
   }
@@ -364,7 +369,7 @@ function CameraOrUploadField({
     setCameraError("");
   }
 
-  async function openCamera() {
+  async function startStream(nextFacing: "user" | "environment") {
     setCameraError("");
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraError("Camera is not available in this browser. Use Upload instead.");
@@ -374,11 +379,12 @@ function CameraOrUploadField({
 
     setStarting(true);
     setCameraOpen(true);
+    releaseStream();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: {
-          facingMode: { ideal: facingMode },
+          facingMode: { ideal: nextFacing },
           width: { ideal: 1280 },
           height: { ideal: 720 }
         }
@@ -388,12 +394,22 @@ function CameraOrUploadField({
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
+      setFacingMode(nextFacing);
     } catch {
       stopCamera();
       setCameraError("Could not open the camera. Allow camera access, or use Upload.");
     } finally {
       setStarting(false);
     }
+  }
+
+  async function openCamera() {
+    await startStream(facingMode);
+  }
+
+  async function switchCamera(nextFacing: "user" | "environment") {
+    if (nextFacing === facingMode && cameraOpen && !starting) return;
+    await startStream(nextFacing);
   }
 
   async function capturePhoto() {
@@ -482,6 +498,28 @@ function CameraOrUploadField({
 
       {cameraOpen && (
         <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-950 p-3 text-white">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={starting}
+              className={`flex-1 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                facingMode === "user" ? "bg-white text-slate-950" : "bg-white/15 text-white hover:bg-white/25"
+              }`}
+              onClick={() => switchCamera("user")}
+            >
+              Front camera
+            </button>
+            <button
+              type="button"
+              disabled={starting}
+              className={`flex-1 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                facingMode === "environment" ? "bg-white text-slate-950" : "bg-white/15 text-white hover:bg-white/25"
+              }`}
+              onClick={() => switchCamera("environment")}
+            >
+              Back camera
+            </button>
+          </div>
           <video
             ref={videoRef}
             autoPlay
