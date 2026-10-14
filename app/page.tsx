@@ -67,6 +67,8 @@ type Session = {
   department?: Department;
   userId?: string;
   departmentId?: string;
+  subsidiaryId?: string;
+  subsidiaryName?: string;
 };
 
 type DepartmentSubmission = {
@@ -230,7 +232,17 @@ const departments: Department[] = [
 const rolePages: Record<Role, PageId[]> = {
   chairman: ["Executive Dashboard", "Approval Queue", "Department Reports", "Staff Register", "Staff Applications", "Leave", "Letters", "Assets", "Users"],
   "managing-director": ["Staff Register", "Staff Applications", "Leave", "Letters"],
-  "executive-director": ["Leave", "Directorate KPIs", "Staff Register"],
+  "executive-director": [
+    "Operations Overview",
+    "Department Reports",
+    "Department Compliance",
+    "Exceptions",
+    "Marketing Pipeline",
+    "Assets",
+    "Staff Register",
+    "Leave",
+    "Directorate KPIs"
+  ],
   "general-manager": ["Operations Overview", "Department Compliance", "Exceptions", "Marketing Pipeline", "Staff Register", "Staff Applications", "Assets", "Users"],
   "director-of-administration": ["Admin Dashboard", "Directorate KPIs", "Staff Register", "Staff Applications", "Leave", "Letters", "Users"],
   "human-resources": ["Staff Register", "Staff Applications", "Leave", "Letters"],
@@ -529,7 +541,9 @@ export default function Home() {
           name: next.name,
           department: next.department as Department | undefined,
           userId: next.userId,
-          departmentId: next.departmentId ?? undefined
+          departmentId: next.departmentId ?? undefined,
+          subsidiaryId: next.subsidiaryId ?? undefined,
+          subsidiaryName: next.subsidiaryName ?? undefined
         });
         setActivePage(rolePages[next.role][0]);
       } catch {
@@ -584,18 +598,46 @@ export default function Home() {
     setShowNotifications(false);
   }
 
+  const subsidiaryScoped = session?.role === "executive-director";
+  const scopedDepartmentRows = useMemo(() => {
+    if (!subsidiaryScoped || !session?.subsidiaryId) return departmentRows;
+    return departmentRows.filter((item) => item.subsidiaryId === session.subsidiaryId);
+  }, [subsidiaryScoped, session?.subsidiaryId, departmentRows]);
+
+  const scopedSubmissions = useMemo(() => {
+    if (!subsidiaryScoped) return submissions;
+    if (session?.subsidiaryName) {
+      return submissions.filter((item) => item.subsidiary === session.subsidiaryName);
+    }
+    const allowed = new Set(scopedDepartmentRows.map((item) => item.id));
+    return submissions.filter((item) => (item.departmentId ? allowed.has(item.departmentId) : false));
+  }, [subsidiaryScoped, session?.subsidiaryName, submissions, scopedDepartmentRows]);
+
+  const scopedLeads = useMemo(() => {
+    if (!subsidiaryScoped || !session?.subsidiaryName) return leads;
+    const prefix = `${session.subsidiaryName} · `;
+    return leads.filter((item) => item.assignedDepartment.startsWith(prefix) || item.assignedDepartment === session.subsidiaryName);
+  }, [subsidiaryScoped, session?.subsidiaryName, leads]);
+
+  const scopedAssets = useMemo(() => {
+    if (!subsidiaryScoped || !session?.subsidiaryName) return assetRows;
+    const prefix = `${session.subsidiaryName} · `;
+    return assetRows.filter((item) => item.department_id.startsWith(prefix) || item.department_id === session.subsidiaryName);
+  }, [subsidiaryScoped, session?.subsidiaryName, assetRows]);
+
+  const metricsSource = subsidiaryScoped ? scopedSubmissions : submissions;
   const metrics = useMemo(() => {
-    const submitted = submissions.filter((item) => item.status !== "Draft");
-    const approved = submissions.filter((item) => item.status === "Approved");
-    const pending = submissions.filter((item) => item.status === "Pending Chairman Review");
-    const drafts = submissions.filter((item) => item.status === "Draft");
-    const returned = submissions.filter((item) => item.status === "Returned");
+    const submitted = metricsSource.filter((item) => item.status !== "Draft");
+    const approved = metricsSource.filter((item) => item.status === "Approved");
+    const pending = metricsSource.filter((item) => item.status === "Pending Chairman Review");
+    const drafts = metricsSource.filter((item) => item.status === "Draft");
+    const returned = metricsSource.filter((item) => item.status === "Returned");
     const totalRevenue = submitted.reduce((sum, item) => sum + item.revenue, 0);
     const totalCash = submitted.reduce((sum, item) => sum + item.cashIn, 0);
     const totalExpenses = submitted.reduce((sum, item) => sum + item.expenses, 0);
     const alerts = submitted.reduce((sum, item) => sum + item.assetsFlagged, 0);
     return { submitted, approved, pending, drafts, returned, totalRevenue, totalCash, totalExpenses, alerts };
-  }, [submissions]);
+  }, [metricsSource]);
 
   const notifications = dbNotifications;
 
@@ -966,22 +1008,44 @@ export default function Home() {
             {session.role === "chairman" && activePage === "Department Reports" && (
               <DepartmentReportsPage submissions={submissions} approvalActions={approvalActions} departmentRows={departmentRows} onReportOpen={setSelectedReportId} />
             )}
-            {(session.role === "chairman" || session.role === "general-manager") && activePage === "Assets" && (
-              <AssetsPage assets={assetRows} departments={departmentRows} onCreate={addAssetRecord} />
+            {(session.role === "chairman" || session.role === "general-manager" || session.role === "executive-director") &&
+              activePage === "Assets" && (
+              <AssetsPage
+                assets={session.role === "executive-director" ? scopedAssets : assetRows}
+                departments={session.role === "executive-director" ? scopedDepartmentRows : departmentRows}
+                onCreate={addAssetRecord}
+                readOnly={session.role === "executive-director"}
+              />
             )}
             {(session.role === "chairman" || session.role === "general-manager" || session.role === "director-of-administration") && activePage === "Users" && (
               <UsersPage />
             )}
-            {session.role === "general-manager" &&
+            {session.role === "executive-director" && activePage === "Department Reports" && (
+              <DepartmentReportsPage
+                submissions={scopedSubmissions}
+                approvalActions={approvalActions.filter((item) => !session.subsidiaryName || item.subsidiary === session.subsidiaryName)}
+                departmentRows={scopedDepartmentRows}
+                onReportOpen={setSelectedReportId}
+                title="Subsidiary Department Reports"
+                subtitle={`Daily reports across ${session.subsidiaryName || "your subsidiary"}. You can approve or return reports from your departments.`}
+              />
+            )}
+            {(session.role === "general-manager" || session.role === "executive-director") &&
               activePage !== "Users" &&
               activePage !== "Assets" &&
               activePage !== "Staff Register" &&
-              activePage !== "Staff Applications" && (
+              activePage !== "Staff Applications" &&
+              activePage !== "Leave" &&
+              activePage !== "Letters" &&
+              activePage !== "Directorate KPIs" &&
+              !(session.role === "executive-director" && activePage === "Department Reports") && (
               <GeneralManagerDashboard
                 activePage={activePage}
-                submissions={submissions}
-                leads={leads}
-                assets={assetRows}
+                mode={session.role === "executive-director" ? "ed" : "gm"}
+                subsidiaryName={session.subsidiaryName}
+                submissions={session.role === "executive-director" ? scopedSubmissions : submissions}
+                leads={session.role === "executive-director" ? scopedLeads : leads}
+                assets={session.role === "executive-director" ? scopedAssets : assetRows}
                 metrics={metrics}
                 onReportOpen={setSelectedReportId}
                 onStatusChange={async (id, status) => {
@@ -992,7 +1056,7 @@ export default function Home() {
                   }
                 }}
                 onReturnRequest={requestReportReturn}
-                departmentRows={departmentRows}
+                departmentRows={session.role === "executive-director" ? scopedDepartmentRows : departmentRows}
               />
             )}
             {writesDepartmentReports(session.role) && (
@@ -1172,7 +1236,9 @@ function LoginScreen({ onLogin }: { onLogin: (session: Session) => void }) {
         name: next.name,
         department: next.department as Department | undefined,
         userId: next.userId,
-        departmentId: next.departmentId ?? undefined
+        departmentId: next.departmentId ?? undefined,
+        subsidiaryId: next.subsidiaryId ?? undefined,
+        subsidiaryName: next.subsidiaryName ?? undefined
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed");
@@ -1445,7 +1511,7 @@ function ReportOverview({
   onReturnRequest: () => void;
 }) {
   const canExecutiveAct =
-    (session.role === "chairman" || session.role === "general-manager") &&
+    (session.role === "chairman" || session.role === "general-manager" || session.role === "executive-director") &&
     report.status !== "Draft" &&
     report.status !== "Approved";
 
@@ -1522,7 +1588,8 @@ function ReportOverview({
               </div>
             </div>
           )}
-          {(session.role === "general-manager" || session.role === "chairman") && report.status === "Approved" && (
+          {(session.role === "general-manager" || session.role === "chairman" || session.role === "executive-director") &&
+            report.status === "Approved" && (
             <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
               This report is approved and locked for record integrity.
             </div>
@@ -1782,12 +1849,16 @@ function DepartmentReportsPage({
   submissions,
   approvalActions,
   departmentRows,
-  onReportOpen
+  onReportOpen,
+  title = "Department Reports",
+  subtitle = "Submitted daily reports by subsidiary, then by the department inside it."
 }: {
   submissions: DepartmentSubmission[];
   approvalActions: ApprovalAction[];
   departmentRows: DepartmentRow[];
   onReportOpen: (id: string) => void;
+  title?: string;
+  subtitle?: string;
 }) {
   const groups = groupBySubsidiary(departmentRows);
   const sections: Array<{ id: string; name: string; departments: Array<{ id: string; name: string }> }> = groups.length
@@ -1807,10 +1878,7 @@ function DepartmentReportsPage({
 
   return (
     <div className="space-y-6">
-      <PageTitle
-        title="Department Reports"
-        subtitle="Submitted daily reports by subsidiary, then by the department inside it."
-      />
+      <PageTitle title={title} subtitle={subtitle} />
       <div className="space-y-8">
         {sections.map((group) => (
           <section key={group.id} className="space-y-4">
@@ -1873,11 +1941,13 @@ function DepartmentReportsPage({
 function AssetsPage({
   assets: assetList,
   departments: departmentOptions,
-  onCreate
+  onCreate,
+  readOnly = false
 }: {
   assets: AssetRecord[];
   departments: DepartmentRow[];
   onCreate: (asset: AssetRecord) => Promise<void>;
+  readOnly?: boolean;
 }) {
   const [form, setForm] = useState({
     asset_id: "",
@@ -1955,7 +2025,11 @@ function AssetsPage({
     <div className="space-y-6">
       <PageTitle
         title="Assets"
-        subtitle="Chairman's fixed-asset register with supplier, serial number, custodian, warranty, and maintenance accountability fields."
+        subtitle={
+          readOnly
+            ? "Fixed assets in your subsidiary — supplier, custodian, warranty, and maintenance status."
+            : "Chairman's fixed-asset register with supplier, serial number, custodian, warranty, and maintenance accountability fields."
+        }
       />
       <MetricGrid>
         <MetricCard label="Tracked Assets" value={assetList.length.toString()} tone="blue" />
@@ -1964,6 +2038,7 @@ function AssetsPage({
         <MetricCard label="Book Value" value={formatNaira(bookValue)} tone="green" />
       </MetricGrid>
 
+      {!readOnly && (
       <Panel title="Register New Asset" subtitle="Add assets for Chairman, General Manager, and department visibility.">
         <form onSubmit={handleCreate} className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <FormInput label="Asset ID" value={form.asset_id} onChange={(value) => setForm({ ...form, asset_id: value })} />
@@ -2006,8 +2081,9 @@ function AssetsPage({
           </div>
         </form>
       </Panel>
+      )}
 
-      <Panel title="Asset Register" subtitle="Live assets stored in Supabase.">
+      <Panel title="Asset Register" subtitle={readOnly ? "Assets assigned to departments in your subsidiary." : "Live assets stored in Supabase."}>
         {assetList.length ? (
           <SimpleTable
             headers={[
@@ -2382,6 +2458,8 @@ function roleFromDbLabel(role: string) {
 
 function GeneralManagerDashboard({
   activePage,
+  mode = "gm",
+  subsidiaryName,
   submissions,
   leads,
   assets: assetList,
@@ -2392,6 +2470,8 @@ function GeneralManagerDashboard({
   departmentRows
 }: {
   activePage: PageId;
+  mode?: "gm" | "ed";
+  subsidiaryName?: string;
   submissions: DepartmentSubmission[];
   leads: MarketingLead[];
   assets: AssetRecord[];
@@ -2408,6 +2488,8 @@ function GeneralManagerDashboard({
   onReturnRequest: (id: string) => void;
   departmentRows: DepartmentRow[];
 }) {
+  const isEd = mode === "ed";
+  const scopeLabel = isEd ? subsidiaryName || "your subsidiary" : "the corporation";
   const critical = submissions.filter((item) => item.priority === "Critical");
   const attentionAssets = assetList.filter(
     (asset) =>
@@ -2420,7 +2502,11 @@ function GeneralManagerDashboard({
       <div className="space-y-6">
         <PageTitle
           title="Department Compliance"
-          subtitle="General Manager monitoring page for department submission discipline, returned reports, and pending Chairman approvals."
+          subtitle={
+            isEd
+              ? `Submission discipline across ${scopeLabel} — returned reports and pending Chairman approvals.`
+              : "General Manager monitoring page for department submission discipline, returned reports, and pending Chairman approvals."
+          }
         />
         <Panel title="Compliance Matrix" subtitle="Submission status by arm.">
           <DepartmentMatrix submissions={submissions} departmentRows={departmentRows} />
@@ -2437,7 +2523,11 @@ function GeneralManagerDashboard({
       <div className="space-y-6">
         <PageTitle
           title="Exceptions"
-          subtitle="Critical and attention-level matters requiring General Manager follow-up before Chairman decision."
+          subtitle={
+            isEd
+              ? `Critical and attention items inside ${scopeLabel} that need your awareness before Chairman decision.`
+              : "Critical and attention-level matters requiring General Manager follow-up before Chairman decision."
+          }
         />
         <MetricGrid>
           <MetricCard label="Critical Items" value={critical.length.toString()} tone="red" />
@@ -2470,7 +2560,11 @@ function GeneralManagerDashboard({
       <div className="space-y-6">
         <PageTitle
           title="Marketing Pipeline"
-          subtitle="General Manager view of business development opportunities assigned to operational departments."
+          subtitle={
+            isEd
+              ? `Leads assigned to departments inside ${scopeLabel}.`
+              : "General Manager view of business development opportunities assigned to operational departments."
+          }
         />
         <MetricGrid>
           <MetricCard label="Total Leads" value={leads.length.toString()} tone="blue" />
@@ -2488,8 +2582,12 @@ function GeneralManagerDashboard({
   return (
     <div className="min-w-0 space-y-6 overflow-x-hidden">
       <PageTitle
-        title="General Manager Operations Dashboard"
-        subtitle="Operational command page for monitoring departmental compliance, unresolved exceptions, asset alerts, and pipeline movement."
+        title={isEd ? "Subsidiary Operations Overview" : "General Manager Operations Dashboard"}
+        subtitle={
+          isEd
+            ? `Full picture of ${scopeLabel}: compliance, exceptions, assets, and pipeline movement.`
+            : "Operational command page for monitoring departmental compliance, unresolved exceptions, asset alerts, and pipeline movement."
+        }
       />
       <MetricGrid>
         <MetricCard label="Active Operations" value={submissions.reduce((sum, item) => sum + item.activeOperations, 0).toString()} tone="blue" />
@@ -2507,7 +2605,10 @@ function GeneralManagerDashboard({
             showActions
           />
         </Panel>
-        <Panel title="Exception Register" subtitle="Items for General Manager intervention before Chairman review.">
+        <Panel
+          title="Exception Register"
+          subtitle={isEd ? "Items that need subsidiary awareness before Chairman review." : "Items for General Manager intervention before Chairman review."}
+        >
           <div className="space-y-3">
             {critical.map((item) => (
               <div key={item.id} className="rounded-xl border border-red-100 bg-red-50 p-4">
@@ -2518,7 +2619,7 @@ function GeneralManagerDashboard({
           </div>
         </Panel>
       </div>
-      <Panel title="Corporate Asset Snapshot" subtitle="Assets requiring executive awareness.">
+      <Panel title={isEd ? "Subsidiary Asset Snapshot" : "Corporate Asset Snapshot"} subtitle="Assets requiring executive awareness.">
         {attentionAssets.length ? (
           <SimpleTable
             headers={["Asset ID", "Asset", "Department", "Custodian", "Status", "Maintenance Interval", "Warranty Expiration"]}

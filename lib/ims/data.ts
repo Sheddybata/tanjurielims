@@ -16,8 +16,10 @@ export type ProfileRow = {
   full_name: string;
   role: DbRole;
   department_id: string | null;
+  subsidiary_id?: string | null;
   is_active: boolean;
   departments?: { id: string; name: string } | null;
+  subsidiaries?: { id: string; name: string; code?: string | null } | null;
 };
 
 export type DepartmentRow = {
@@ -63,6 +65,21 @@ export async function getSessionUser() {
 
 export async function fetchProfile(userId: string): Promise<ProfileRow | null> {
   const supabase = getSupabaseBrowser();
+  const rich = await supabase
+    .from("profiles")
+    .select("id, full_name, role, department_id, subsidiary_id, is_active, departments(id, name), subsidiaries(id, name, code)")
+    .eq("id", userId)
+    .maybeSingle();
+  if (!rich.error) {
+    const row = rich.data as any;
+    if (!row) return null;
+    const subsidiary = Array.isArray(row.subsidiaries) ? row.subsidiaries[0] : row.subsidiaries;
+    return {
+      ...(row as ProfileRow),
+      subsidiaries: subsidiary ?? null
+    };
+  }
+
   const { data, error } = await supabase
     .from("profiles")
     .select("id, full_name, role, department_id, is_active, departments(id, name)")
@@ -87,12 +104,15 @@ export async function fetchDepartments(): Promise<DepartmentRow[]> {
 
 export function profileToSession(profile: ProfileRow) {
   const role = roleFromDb[profile.role] as UiRole;
+  const subsidiary = Array.isArray(profile.subsidiaries) ? profile.subsidiaries[0] : profile.subsidiaries;
   return {
     role,
     name: profile.full_name,
     department: profile.departments?.name as string | undefined,
     userId: profile.id,
-    departmentId: profile.department_id
+    departmentId: profile.department_id,
+    subsidiaryId: profile.subsidiary_id ?? subsidiary?.id ?? null,
+    subsidiaryName: subsidiary?.name ?? null
   };
 }
 
