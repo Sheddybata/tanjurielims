@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isCaller, requireCaller } from "@/lib/ims/require-user";
 import { getSupabaseAdmin } from "@/lib/supabase/client";
+import { describePeople, peopleSharingId } from "@/lib/ims/identity";
+import { linkStaffToProfile } from "@/lib/ims/service-server";
 
 const REVIEWER_ROLES = new Set(["director_of_administration", "human_resources"]);
 const READER_ROLES = new Set([
@@ -164,16 +166,39 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ application: data });
   }
 
-  const { data: staffNumber, error: numberError } = await admin.rpc("allocate_staff_number", {
-    p_department_id: application.department_id
-  });
-  if (numberError || !staffNumber) {
-    return NextResponse.json({ error: numberError?.message || "Could not issue a staff number" }, { status: 400 });
-  }
-
-  const { data: staff, error: staffError } = await admin
+  const { data: roster } = await admin
     .from("staff")
-    .insert({
+    .select("id, staff_number, full_name, personal_email, phone, government_id_number, nin, status");
+  const sharing = peopleSharingId(roster ?? [], {
+    id: application.staff_id || application.id,
+    full_name: application.full_name,
+    government_id_number: application.government_id_number,
+    nin: application.nin
+  });
+
+  const email = String(application.personal_email ?? "").trim().toLowerCase();
+  const phone = String(application.phone ?? "").replace(/\D/g, "");
+  const samePerson =
+    (roster ?? []).find((person) => application.staff_id && person.id === application.staff_id) ??
+    (roster ?? []).find((person) => email && String(person.personal_email ?? "").trim().toLowerCase() === email) ??
+    (roster ?? []).find((person) => {
+      const existingPhone = String(person.phone ?? "").replace(/\D/g, "");
+      return Boolean(phone && existingPhone && existingPhone === phone && person.full_name === application.full_name);
+    });
+
+  let staff = samePerson
+    ? { id: samePerson.id, staff_number: samePerson.staff_number, full_name: samePerson.full_name }
+    : null;
+
+  if (!staff) {
+    const { data: staffNumber, error: numberError } = await admin.rpc("allocate_staff_number", {
+      p_department_id: application.department_id
+    });
+    if (numberError || !staffNumber) {
+      return NextResponse.json({ error: numberError?.message || "Could not issue a staff number" }, { status: 400 });
+    }
+
+    const payload = {
       staff_number: staffNumber,
       department_id: application.department_id,
       full_name: application.full_name,
@@ -191,11 +216,11 @@ export async function PATCH(request: NextRequest) {
       next_of_kin_name: application.next_of_kin_name,
       next_of_kin_phone: application.next_of_kin_phone,
       government_id_type: application.government_id_type,
-      government_id_number: application.government_id_number || "pending",
-      nin: application.nin,
+      government_id_number: application.government_id_number || application.nin || null,
+      nin: application.nin || application.government_id_number || null,
       bvn: application.bvn,
       bank_name: application.bank_name,
-      bank_account: application.bank_account || "pending",
+      bank_account: application.bank_account || null,
       highest_qualification: application.highest_qualification,
       blood_group: application.blood_group,
       proposed_ims_role: application.proposed_ims_role,
@@ -209,12 +234,30 @@ export async function PATCH(request: NextRequest) {
       annual_leave_days: application.annual_leave_days ?? 10,
       photograph_path: application.photograph_path,
       created_by: caller.userId
-    })
-    .select("id, staff_number, full_name")
-    .single();
+    };
 
-  if (staffError || !staff) {
-    return NextResponse.json({ error: staffError?.message || "Could not create staff record" }, { status: 400 });
+    let created = await admin.from("staff").insert(payload).select("id, staff_number, full_name").single();
+    if (created.error && /null value/i.test(created.error.message)) {
+      created = await admin
+        .from("staff")
+        .insert({
+          ...payload,
+          government_id_number: payload.government_id_number || payload.nin || `pending-${application.id}`,
+          bank_account: payload.bank_account || `pending-${application.id}`
+        })
+        .select("id, staff_number, full_name")
+        .single();
+    }
+    if (created.error || !created.data) {
+      const named = sharing.length
+        ? ` This government-issued ID is already used by ${describePeople(sharing)}.`
+        : "";
+      return NextResponse.json(
+        { error: `${created.error?.message || "Could not create staff record"}.${named}`.trim() },
+        { status: 400 }
+      );
+    }
+    staff = created.data;
   }
 
   const { data: updated, error: updateError } = await admin
@@ -234,9 +277,16 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: updateError.message }, { status: 400 });
   }
 
+  await linkStaffToProfile(admin, staff.id, [application.personal_email, application.work_email], application.full_name);
+
+  const clashNote = sharing.length
+    ? ` Same government-issued ID as ${describePeople(sharing)}.`
+    : "";
+
   return NextResponse.json({
     application: updated,
     staff,
-    message: `${staff.full_name} approved as ${staff.staff_number}.`
+    sharedWith: sharing,
+    message: `${staff.full_name} approved as ${staff.staff_number}.${clashNote}`
   });
 }

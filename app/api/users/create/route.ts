@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase/client";
 import { roleToDb, type UiRole } from "@/lib/ims/mappers";
+import { attachProfileToStaff } from "@/lib/ims/service-server";
 
 type CreateUserBody = {
   email: string;
@@ -92,6 +93,8 @@ export async function POST(request: NextRequest) {
         : insertError.message;
       return NextResponse.json({ error: message }, { status: 400 });
     }
+
+    await attachProfileToStaff(admin, created.user.id, [body.email], body.fullName, body.departmentId ?? null);
 
     return NextResponse.json({
       id: created.user.id,

@@ -1,10 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { fetchDepartments, type DepartmentRow } from "@/lib/ims/data";
-import { leaveRules, type LeaveCode } from "@/lib/ims/leave-rules";
+import { clampLeaveEndDate, leaveDateWindow, leaveRules, type LeaveCode } from "@/lib/ims/leave-rules";
 import { groupBySubsidiary, SubsidiaryDepartmentFields } from "@/app/components/org-select";
+import { matchesIdentity, type SharedIdGroup } from "@/lib/ims/identity";
+import { ListLoader } from "@/app/components/list-loader";
 
 type PeoplePage = "Staff Register" | "Staff Applications" | "Leave" | "Letters";
 
@@ -25,19 +27,27 @@ type StaffRow = {
   id: string;
   staff_number: string;
   full_name: string;
+  preferred_name?: string | null;
   job_title: string;
   phone: string;
   personal_email: string;
+  work_email?: string | null;
   start_date: string;
   status: string;
   date_of_birth: string;
   sex: string;
+  nationality?: string | null;
   home_address: string;
   next_of_kin_name: string;
   next_of_kin_phone: string;
-  government_id_number: string;
-  bank_account: string;
+  government_id_type?: string | null;
+  government_id_number?: string | null;
+  nin?: string | null;
+  bvn?: string | null;
+  bank_name?: string | null;
+  bank_account?: string | null;
   annual_leave_days: number;
+  photoUrl?: string | null;
   departments?: StaffDepartment | null;
 };
 
@@ -84,12 +94,14 @@ export function PeopleOffice({
   page,
   role,
   canWritePeople,
-  canApproveLeave
+  canApproveLeave,
+  subsidiaryId
 }: {
   page: PeoplePage;
   role: string;
   canWritePeople: boolean;
   canApproveLeave: boolean;
+  subsidiaryId?: string;
 }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -99,6 +111,8 @@ export function PeopleOffice({
   const [requests, setRequests] = useState<any[]>([]);
   const [applications, setApplications] = useState<any[]>([]);
   const [canReviewApplications, setCanReviewApplications] = useState(false);
+  const [sharedIds, setSharedIds] = useState<SharedIdGroup[]>([]);
+  const [loading, setLoading] = useState(true);
 
   async function load() {
     const headers = await authHeaders();
@@ -109,7 +123,10 @@ export function PeopleOffice({
     const staffPayload = await staffResponse.json();
     if (!staffResponse.ok) throw new Error(staffPayload.error || "Failed to load staff");
     setStaff(staffPayload.staff ?? []);
-    setDepartments(departmentRows);
+    setSharedIds(staffPayload.sharedIds ?? []);
+    setDepartments(
+      subsidiaryId ? departmentRows.filter((item) => item.subsidiaryId === subsidiaryId) : departmentRows
+    );
 
     if (page === "Letters") {
       const response = await fetch("/api/letters", { headers });
@@ -133,8 +150,11 @@ export function PeopleOffice({
   }
 
   useEffect(() => {
-    load().catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
-  }, [page]);
+    setLoading(true);
+    load()
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
+      .finally(() => setLoading(false));
+  }, [page, subsidiaryId]);
 
   return (
     <div className="space-y-6">
@@ -144,14 +164,37 @@ export function PeopleOffice({
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
           {page === "Staff Applications"
             ? "Public submissions from /apply. HR and Director of Administration verify records. Staff ID is issued only on approval."
-            : "Staff numbers use the department and the year, for example TAN/EMP/ICT/2026/001. A number can be given to a new employee after the previous holder is marked resigned, retired, or dismissed."}
+            : page === "Staff Register"
+              ? role === "executive-director"
+                ? "Verified staff in your subsidiary only. Click a name for identity details. Shared government IDs are flagged at the top."
+                : "Every verified staff record. Click a name for identity details. Shared government IDs are flagged at the top."
+              : page === "Leave"
+                ? role === "executive-director"
+                  ? "Leave from staff in your subsidiary waits here first. Approve to send it to the Director of Administration, or refuse it."
+                  : "Leave waits on the Executive Director first, then the Director of Administration."
+                : "Staff numbers use the department and the year, for example TAN/EMP/ICT/2026/001. A number can be given to a new employee after the previous holder is marked resigned, retired, or dismissed."}
         </p>
       </div>
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
       {notice && <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">{notice}</div>}
-      {page === "Staff Register" && (
+      {loading && (
+        <ListLoader
+          label={
+            page === "Staff Register"
+              ? "Loading staff…"
+              : page === "Staff Applications"
+                ? "Loading applications…"
+                : page === "Leave"
+                  ? "Loading leave…"
+                  : "Loading…"
+          }
+          variant="table"
+        />
+      )}
+      {!loading && page === "Staff Register" && (
         <StaffRegister
           staff={staff}
+          sharedIds={sharedIds}
           departments={departments}
           canWrite={canWritePeople}
           onSaved={async (message) => {
@@ -162,9 +205,10 @@ export function PeopleOffice({
           onError={setError}
         />
       )}
-      {page === "Staff Applications" && (
+      {!loading && page === "Staff Applications" && (
         <ApplicationsPanel
           applications={applications}
+          staff={staff}
           canReview={canReviewApplications}
           onSaved={async (message) => {
             setNotice(message);
@@ -174,7 +218,7 @@ export function PeopleOffice({
           onError={setError}
         />
       )}
-      {page === "Letters" && (
+      {!loading && page === "Letters" && (
         <LettersPanel
           staff={staff}
           departments={departments}
@@ -188,7 +232,7 @@ export function PeopleOffice({
           onError={setError}
         />
       )}
-      {page === "Leave" && (
+      {!loading && page === "Leave" && (
         <LeavePanel
           staff={staff}
           departments={departments}
@@ -210,18 +254,24 @@ export function PeopleOffice({
 
 function StaffRegister({
   staff,
+  sharedIds,
   departments,
   canWrite,
   onSaved,
   onError
 }: {
   staff: StaffRow[];
+  sharedIds: SharedIdGroup[];
   departments: DepartmentRow[];
   canWrite: boolean;
   onSaved: (message: string) => Promise<void>;
   onError: (message: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"serving" | "all" | "left">("all");
+  const [openId, setOpenId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [docType, setDocType] = useState("cv");
   const [file, setFile] = useState<File | null>(null);
@@ -229,6 +279,32 @@ function StaffRegister({
   const [departmentId, setDepartmentId] = useState("");
   const [fileSubsidiaryId, setFileSubsidiaryId] = useState("");
   const [fileDepartmentId, setFileDepartmentId] = useState("");
+  const leftService = new Set(["resigned", "retired", "dismissed"]);
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return staff.filter((person) => {
+      const left = leftService.has(person.status);
+      if (statusFilter === "serving" && left) return false;
+      if (statusFilter === "left" && !left) return false;
+      if (!needle) return true;
+      return [
+        person.full_name,
+        person.preferred_name,
+        person.staff_number,
+        person.job_title,
+        person.phone,
+        person.nin,
+        person.government_id_number,
+        departmentLabel(person.departments)
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [staff, query, statusFilter]);
+  const openPerson = staff.find((person) => person.id === openId) ?? null;
+  const openShares = sharedIds.filter((group) => group.people.some((item) => item.id === openId));
 
   async function createStaff(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -248,7 +324,8 @@ function StaffRegister({
       event.currentTarget.reset();
       setSubsidiaryId("");
       setDepartmentId("");
-      await onSaved(`${payload.staff.full_name} is registered as ${payload.staff.staff_number}.`);
+      const warning = payload.warning ? ` ${payload.warning}` : "";
+      await onSaved(`${payload.staff.full_name} is registered as ${payload.staff.staff_number}.${warning}`);
     } catch (err) {
       onError(err instanceof Error ? err.message : "Failed to add staff");
     } finally {
@@ -298,7 +375,54 @@ function StaffRegister({
 
   return (
     <div className="space-y-6">
-      {canWrite && (
+      {sharedIds.length > 0 && (
+        <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5">
+          <p className="text-sm font-semibold text-amber-950">Same government-issued ID used more than once</p>
+          <div className="mt-3 space-y-3">
+            {sharedIds.map((group) => (
+              <p key={group.key} className="text-sm text-amber-900">
+                <span className="font-semibold">{group.label}</span>
+                {" — "}
+                {group.people
+                  .map((person) => `${person.fullName}${person.staffNumber ? ` (${person.staffNumber})` : ""}`)
+                  .join(" · ")}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <input
+            className="form-control"
+            placeholder="Search name, Staff ID, NIN, department"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {([
+            ["serving", `Serving (${staff.filter((person) => !leftService.has(person.status)).length})`],
+            ["all", `All (${staff.length})`],
+            ["left", "Left"]
+          ] as const).map(([id, label]) => (
+            <button key={id} type="button" className={statusFilter === id ? "primary-button" : "secondary-button"} onClick={() => setStatusFilter(id)}>
+              {label}
+            </button>
+          ))}
+          {canWrite && (
+            <button type="button" className="secondary-button" onClick={() => setShowAdd((current) => !current)}>
+              {showAdd ? "Hide add form" : "Add staff"}
+            </button>
+          )}
+        </div>
+      </div>
+      <p className="text-sm text-slate-500">
+        Showing {filtered.length} of {staff.length} records.
+      </p>
+
+      {canWrite && showAdd && (
         <form onSubmit={createStaff} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 md:grid-cols-2">
           <Field label="Full name" name="fullName" required />
           <SubsidiaryDepartmentFields
@@ -319,8 +443,9 @@ function StaffRegister({
           <Field label="Home address" name="homeAddress" required className="md:col-span-2" />
           <Field label="Next of kin name" name="nextOfKinName" required />
           <Field label="Next of kin phone" name="nextOfKinPhone" required />
-          <Field label="Government identity number" name="governmentIdNumber" required />
-          <Field label="Bank account" name="bankAccount" required />
+          <Field label="NIN" name="nin" />
+          <Field label="Government identity number" name="governmentIdNumber" />
+          <Field label="Bank account" name="bankAccount" />
           <div className="md:col-span-2">
             <button type="submit" disabled={busy} className="primary-button disabled:opacity-60">
               {busy ? "Saving..." : "Issue staff number"}
@@ -342,10 +467,19 @@ function StaffRegister({
             </tr>
           </thead>
           <tbody>
-            {staff.map((person) => (
-              <tr key={person.id} className="border-t border-slate-100">
-                <td className="px-4 py-3 font-medium text-slate-950">{person.staff_number}</td>
-                <td className="px-4 py-3">{person.full_name}</td>
+            {filtered.map((person) => {
+              const shared = sharedIds.some((group) => group.people.some((item) => item.id === person.id));
+              return (
+              <tr
+                key={person.id}
+                className={`cursor-pointer border-t border-slate-100 hover:bg-slate-50 ${shared ? "bg-amber-50" : ""}`}
+                onClick={() => setOpenId(person.id)}
+              >
+                <td className="px-4 py-3 font-medium text-slate-950">{person.staff_number || "—"}</td>
+                <td className="px-4 py-3">
+                  {person.full_name}
+                  {shared ? <span className="ml-2 text-[11px] font-bold uppercase tracking-wide text-amber-800">Shared ID</span> : null}
+                </td>
                 <td className="px-4 py-3">{departmentLabel(person.departments)}</td>
                 <td className="px-4 py-3">{person.job_title}</td>
                 <td className="px-4 py-3">{titleCase(person.status)}</td>
@@ -356,7 +490,15 @@ function StaffRegister({
                     ) : (
                       <span className="flex flex-wrap gap-2">
                         {["resigned", "retired", "dismissed"].map((status) => (
-                          <button key={status} type="button" className="table-button" onClick={() => markLeft(person, status)}>
+                          <button
+                            key={status}
+                            type="button"
+                            className="table-button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              markLeft(person, status);
+                            }}
+                          >
                             {titleCase(status)}
                           </button>
                         ))}
@@ -365,15 +507,80 @@ function StaffRegister({
                   </td>
                 )}
               </tr>
-            ))}
-            {!staff.length && (
+              );
+            })}
+            {!filtered.length && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-slate-500">No staff records yet.</td>
+                <td colSpan={6} className="px-4 py-8 text-slate-500">{staff.length ? "No matching staff." : "No staff records yet."}</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {openPerson && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/45 px-3 py-3 sm:items-center" onClick={() => setOpenId(null)}>
+          <section
+            role="dialog"
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl sm:rounded-3xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-blue-800">{openPerson.staff_number || "Staff record"}</p>
+                <h3 className="mt-1 text-lg font-semibold text-slate-950">{openPerson.full_name}</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  {departmentLabel(openPerson.departments)} · {titleCase(openPerson.status)}
+                </p>
+              </div>
+              <button type="button" className="secondary-button" onClick={() => setOpenId(null)}>
+                Close
+              </button>
+            </div>
+            <div className="space-y-3 overflow-y-auto px-5 py-4 text-sm text-slate-700">
+              {openPerson.photoUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={openPerson.photoUrl} alt="" className="h-24 w-24 rounded-2xl object-cover" />
+              )}
+              <p>{openPerson.job_title}</p>
+              <p>
+                {openPerson.phone}
+                {openPerson.personal_email ? ` · ${openPerson.personal_email}` : ""}
+                {openPerson.work_email ? ` · ${openPerson.work_email}` : ""}
+              </p>
+              <p>
+                {openPerson.sex}
+                {openPerson.date_of_birth ? ` · DOB ${openPerson.date_of_birth}` : ""}
+                {openPerson.nationality ? ` · ${openPerson.nationality}` : ""}
+              </p>
+              {openPerson.home_address && <p>{openPerson.home_address}</p>}
+              <p>
+                Next of kin: {openPerson.next_of_kin_name} ({openPerson.next_of_kin_phone})
+              </p>
+              <p>
+                {openPerson.government_id_type ? `${titleCase(openPerson.government_id_type)} ` : "Government ID "}
+                {openPerson.government_id_number || "not recorded"}
+                {openPerson.nin ? ` · NIN ${openPerson.nin}` : ""}
+                {openPerson.bvn ? ` · BVN ${openPerson.bvn}` : ""}
+              </p>
+              {openShares.length > 0 && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950">
+                  {openShares.map((group) => (
+                    <p key={group.key}>
+                      {group.label} is also used by{" "}
+                      {group.people
+                        .filter((item) => item.id !== openPerson.id)
+                        .map((item) => `${item.fullName}${item.staffNumber ? ` (${item.staffNumber})` : ""}`)
+                        .join(", ")}
+                      .
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
 
       {canWrite && staff.length > 0 && (
         <form onSubmit={uploadFile} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 md:grid-cols-3">
@@ -426,11 +633,13 @@ function StaffRegister({
 
 function ApplicationsPanel({
   applications,
+  staff,
   canReview,
   onSaved,
   onError
 }: {
   applications: any[];
+  staff: StaffRow[];
   canReview: boolean;
   onSaved: (message: string) => Promise<void>;
   onError: (message: string) => void;
@@ -439,6 +648,9 @@ function ApplicationsPanel({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const selected = applications.find((item) => item.id === selectedId) ?? null;
+  const selectedMatches = selected
+    ? staff.filter((person) => matchesIdentity(person, selected) && person.id !== selected.staff_id && person.id !== selected.staff?.id)
+    : [];
 
   function closePopup() {
     setSelectedId("");
@@ -582,6 +794,15 @@ function ApplicationsPanel({
                     {selected.nin ? ` · NIN ${selected.nin}` : ""}
                     {selected.bvn ? ` · BVN ${selected.bvn}` : ""}
                   </p>
+                  {selectedMatches.length > 0 && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950">
+                      This government-issued ID is already on{" "}
+                      {selectedMatches
+                        .map((person) => `${person.full_name}${person.staff_number ? ` (${person.staff_number})` : ""}`)
+                        .join(", ")}
+                      .
+                    </div>
+                  )}
                   {(selected.bank_name || selected.bank_account) && (
                     <p>Bank: {[selected.bank_name, selected.bank_account].filter(Boolean).join(" · ")}</p>
                   )}
@@ -767,6 +988,10 @@ function LeavePanel({
   onError: (message: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [leaveType, setLeaveType] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const leaveWindow = leaveDateWindow(leaveType, startDate);
 
   async function submitLeave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -783,6 +1008,9 @@ function LeavePanel({
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Failed to submit leave");
       event.currentTarget.reset();
+      setLeaveType("");
+      setStartDate("");
+      setEndDate("");
       await onSaved("Leave request sent to the Executive Director.");
     } catch (err) {
       onError(err instanceof Error ? err.message : "Failed to submit leave");
@@ -802,7 +1030,13 @@ function LeavePanel({
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Failed to update leave");
-      await onSaved(decision === "approve" ? "Leave moved forward." : "Leave refused.");
+      await onSaved(
+        decision === "approve"
+          ? role === "executive-director"
+            ? "Leave sent to the Director of Administration."
+            : "Leave approved."
+          : "Leave refused."
+      );
     } catch (err) {
       onError(err instanceof Error ? err.message : "Failed to update leave");
     }
@@ -811,14 +1045,72 @@ function LeavePanel({
   return (
     <div className="space-y-6">
       <p className="text-sm leading-6 text-slate-600">
-        Annual leave is unpaid and is 10 to 20 working days by the person’s level. Sick leave is unpaid and is 2 to 5 working days. Unused annual leave expires at the end of the year. If no days remain, the request is refused. NYSC members and interns have no leave allowance except emergency leave or unpaid leave on request. Maternity, paternity, and compassionate leave are included, and whether they are paid is still to be confirmed.
+        {role === "executive-director"
+          ? "You are the first decision on leave in this subsidiary. Approve it and it goes to the Director of Administration. Refuse it and it stops here."
+          : "Annual leave is unpaid and is 10 to 20 working days by the person’s level. Sick leave is unpaid and is 2 to 5 working days. Unused annual leave expires at the end of the year. If no days remain, the request is refused. NYSC members and interns have no leave allowance except emergency leave or unpaid leave on request. Maternity, paternity, and compassionate leave are included, and whether they are paid is still to be confirmed."}
       </p>
       {canWrite && (
         <form onSubmit={submitLeave} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 md:grid-cols-2">
           <ScopedStaffSelect staff={staff.filter((person) => !["resigned", "retired", "dismissed"].includes(person.status))} departments={departments} name="staffId" />
-          <Select label="Leave type" name="leaveType" required options={(Object.keys(leaveRules) as LeaveCode[]).map((key) => [key, leaveRules[key].label])} />
-          <Field label="Start date" name="startDate" type="date" required />
-          <Field label="End date" name="endDate" type="date" required />
+          <label className="block">
+            <span className="field-label">Leave type</span>
+            <select
+              name="leaveType"
+              required
+              className="form-control"
+              value={leaveType}
+              onChange={(event) => {
+                const nextType = event.target.value;
+                setLeaveType(nextType);
+                setEndDate(clampLeaveEndDate(nextType, startDate, endDate));
+              }}
+            >
+              <option value="" disabled>
+                Select
+              </option>
+              {(Object.keys(leaveRules) as LeaveCode[]).map((key) => (
+                <option key={key} value={key}>
+                  {leaveRules[key].label}
+                </option>
+              ))}
+            </select>
+            {leaveWindow.hint ? <p className="mt-1 text-xs text-slate-500">{leaveWindow.hint}</p> : null}
+          </label>
+          <label className="block">
+            <span className="field-label">Start date</span>
+            <input
+              name="startDate"
+              type="date"
+              required
+              className="form-control"
+              value={startDate}
+              onChange={(event) => {
+                const nextStart = event.target.value;
+                setStartDate(nextStart);
+                setEndDate(clampLeaveEndDate(leaveType, nextStart, endDate));
+              }}
+            />
+          </label>
+          <label className="block">
+            <span className="field-label">End date</span>
+            <input
+              name="endDate"
+              type="date"
+              required
+              className="form-control"
+              min={leaveWindow.min}
+              max={leaveWindow.max}
+              value={endDate}
+              onChange={(event) => setEndDate(clampLeaveEndDate(leaveType, startDate, event.target.value))}
+            />
+            {leaveWindow.min || leaveWindow.max ? (
+              <p className="mt-1 text-xs text-slate-500">
+                {[leaveWindow.min ? `From ${leaveWindow.min}` : "", leaveWindow.max ? `to ${leaveWindow.max}` : ""]
+                  .filter(Boolean)
+                  .join(" ")}
+              </p>
+            ) : null}
+          </label>
           <Field label="Supporting document note" name="documentNote" className="md:col-span-2" />
           <div className="md:col-span-2">
             <button type="submit" disabled={busy} className="primary-button disabled:opacity-60">Submit leave request</button>

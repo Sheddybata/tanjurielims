@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { fetchDepartments, type DepartmentRow } from "@/lib/ims/data";
+import { ListLoader } from "@/app/components/list-loader";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { SubsidiaryDepartmentFields } from "@/app/components/org-select";
 
@@ -39,10 +40,12 @@ async function authHeaders() {
 
 export function KpiOffice({
   canSetTarget,
-  departmentId
+  departmentId,
+  subsidiaryId: lockedSubsidiaryId
 }: {
   canSetTarget: boolean;
   departmentId?: string;
+  subsidiaryId?: string;
 }) {
   const [departments, setDepartments] = useState<DepartmentRow[]>([]);
   const [kpis, setKpis] = useState<KpiRow[]>([]);
@@ -51,19 +54,24 @@ export function KpiOffice({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   async function load() {
     const headers = await authHeaders();
     const [response, departmentRows] = await Promise.all([fetch("/api/kpis", { headers }), fetchDepartments()]);
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Failed to load targets");
-    setKpis(payload.kpis ?? []);
-    setDepartments(departmentRows);
+    const rows = (payload.kpis ?? []) as KpiRow[];
+    setKpis(lockedSubsidiaryId ? rows.filter((row) => row.subsidiary_id === lockedSubsidiaryId) : rows);
+    setDepartments(lockedSubsidiaryId ? departmentRows.filter((item) => item.subsidiaryId === lockedSubsidiaryId) : departmentRows);
   }
 
   useEffect(() => {
-    load().catch((err) => setError(err instanceof Error ? err.message : "Failed to load targets"));
-  }, []);
+    setLoading(true);
+    load()
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load targets"))
+      .finally(() => setLoading(false));
+  }, [lockedSubsidiaryId, departmentId]);
 
   async function createTarget(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -127,6 +135,7 @@ export function KpiOffice({
 
   function canEnter(kpi: KpiRow) {
     if (canSetTarget) return true;
+    if (lockedSubsidiaryId && kpi.subsidiary_id !== lockedSubsidiaryId) return false;
     if (!departmentId) return true;
     return !kpi.department_id || kpi.department_id === departmentId;
   }
@@ -182,7 +191,9 @@ export function KpiOffice({
       )}
 
       <div className="space-y-3">
-        {kpis.map((kpi) => {
+        {loading ? (
+          <ListLoader label="Loading targets…" />
+        ) : kpis.map((kpi) => {
           const subsidiary = one(kpi.subsidiaries)?.name ?? "Subsidiary";
           const department = one(kpi.departments)?.name;
           return (
@@ -214,7 +225,7 @@ export function KpiOffice({
             </article>
           );
         })}
-        {!kpis.length && <p className="text-sm text-slate-500">No targets yet.</p>}
+        {!loading && !kpis.length && <p className="text-sm text-slate-500">No targets yet.</p>}
       </div>
     </div>
   );

@@ -32,42 +32,47 @@ export type ReportWriteInput = {
   challenges?: string;
   summary: string;
   parentReportId?: string | null;
+  fundsDestination?: string | null;
 };
 
 export async function createDailyReport(input: ReportWriteInput) {
   const supabase = getSupabaseBrowser();
   const now = new Date().toISOString();
-  const { data, error } = await supabase
-    .from("daily_reports")
-    .insert({
-      display_code: input.displayCode,
-      department_id: input.departmentId,
-      submitted_by: input.submittedBy,
-      parent_report_id: input.parentReportId ?? null,
-      reporting_date: input.reportingDate,
-      status: statusToDb[input.status],
-      priority: priorityToDb[input.priority],
-      revenue: input.revenue,
-      inquiries: input.inquiries,
-      attendance: input.attendance,
-      active_operations: input.activeOperations,
-      cash_in: input.cashIn,
-      expenses: input.expenses,
-      assets_flagged: input.assetsFlagged,
-      jobs_completed: input.jobsCompleted || null,
-      jobs_in_progress: input.jobsInProgress || null,
-      department_update: input.departmentUpdate || null,
-      current_projects: input.currentProjects || null,
-      upcoming_projects: input.upcomingProjects || null,
-      growth_ideas: input.growthIdeas || null,
-      challenges: input.challenges || null,
-      summary: input.summary,
-      submitted_at: input.status === "Pending Chairman Review" ? now : null
-    })
-    .select("id, display_code")
-    .single();
-
+  const payload: Record<string, unknown> = {
+    display_code: input.displayCode,
+    department_id: input.departmentId,
+    submitted_by: input.submittedBy,
+    parent_report_id: input.parentReportId ?? null,
+    reporting_date: input.reportingDate,
+    status: statusToDb[input.status],
+    priority: priorityToDb[input.priority],
+    revenue: input.revenue,
+    inquiries: input.inquiries,
+    attendance: input.attendance,
+    active_operations: input.activeOperations,
+    cash_in: input.cashIn,
+    expenses: input.expenses,
+    assets_flagged: input.assetsFlagged,
+    jobs_completed: input.jobsCompleted || null,
+    jobs_in_progress: input.jobsInProgress || null,
+    department_update: input.departmentUpdate || null,
+    current_projects: input.currentProjects || null,
+    upcoming_projects: input.upcomingProjects || null,
+    growth_ideas: input.growthIdeas || null,
+    challenges: input.challenges || null,
+    summary: input.summary,
+    funds_destination: input.fundsDestination || null,
+    submitted_at: input.status === "Pending Chairman Review" ? now : null
+  };
+  let { data, error } = await supabase.from("daily_reports").insert(payload).select("id, display_code").single();
+  if (error && /funds_destination/.test(error.message)) {
+    const { funds_destination: _ignored, ...withoutFunds } = payload;
+    const retry = await supabase.from("daily_reports").insert(withoutFunds).select("id, display_code").single();
+    data = retry.data;
+    error = retry.error;
+  }
   if (error) throw error;
+  if (!data) throw new Error("Failed to save report");
 
   const labels = (input.equipmentStatus ?? []).filter(Boolean);
   if (labels.length) {

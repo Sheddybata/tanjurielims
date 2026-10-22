@@ -18,7 +18,7 @@ export type ProfileRow = {
   department_id: string | null;
   subsidiary_id?: string | null;
   is_active: boolean;
-  departments?: { id: string; name: string } | null;
+  departments?: { id: string; name: string; code?: string | null } | null;
   subsidiaries?: { id: string; name: string; code?: string | null } | null;
 };
 
@@ -67,7 +67,7 @@ export async function fetchProfile(userId: string): Promise<ProfileRow | null> {
   const supabase = getSupabaseBrowser();
   const rich = await supabase
     .from("profiles")
-    .select("id, full_name, role, department_id, subsidiary_id, is_active, departments(id, name), subsidiaries(id, name, code)")
+    .select("id, full_name, role, department_id, subsidiary_id, is_active, departments(id, name, code), subsidiaries(id, name, code)")
     .eq("id", userId)
     .maybeSingle();
   if (!rich.error) {
@@ -111,8 +111,10 @@ export function profileToSession(profile: ProfileRow) {
     department: profile.departments?.name as string | undefined,
     userId: profile.id,
     departmentId: profile.department_id,
+    departmentCode: profile.departments?.code ?? null,
     subsidiaryId: profile.subsidiary_id ?? subsidiary?.id ?? null,
-    subsidiaryName: subsidiary?.name ?? null
+    subsidiaryName: subsidiary?.name ?? null,
+    subsidiaryCode: subsidiary?.code ?? null
   };
 }
 
@@ -121,9 +123,8 @@ function subsidiaryName(value: any) {
   return nested?.name as string | undefined;
 }
 
-export async function fetchDailyReports() {
-  const supabase = getSupabaseBrowser();
-  const columns = `
+function dailyReportColumns(includeFunds: boolean) {
+  return `
       id,
       display_code,
       reporting_date,
@@ -144,22 +145,32 @@ export async function fetchDailyReports() {
       growth_ideas,
       challenges,
       summary,
+      ${includeFunds ? "funds_destination," : ""}
       submitted_by,
       department_id,
       submitter:profiles!daily_reports_submitted_by_fkey(full_name),
       daily_report_equipment_status(equipment_label)
     `;
-  const rich = await supabase
-    .from("daily_reports")
-    .select(`${columns}, departments(name, subsidiaries(name))`)
-    .order("created_at", { ascending: false });
-  const plain = rich.error
-    ? await supabase
-        .from("daily_reports")
-        .select(`${columns}, departments(name)`)
-        .order("created_at", { ascending: false })
-    : null;
-  const result = plain ?? rich;
+}
+
+export async function fetchDailyReports() {
+  const supabase = getSupabaseBrowser();
+  async function query(includeFunds: boolean) {
+    const columns = dailyReportColumns(includeFunds);
+    const rich = await supabase
+      .from("daily_reports")
+      .select(`${columns}, departments(name, subsidiaries(name))`)
+      .order("created_at", { ascending: false });
+    if (!rich.error) return rich;
+    return supabase
+      .from("daily_reports")
+      .select(`${columns}, departments(name)`)
+      .order("created_at", { ascending: false });
+  }
+  let result = await query(true);
+  if (result.error && /funds_destination/.test(result.error.message)) {
+    result = await query(false);
+  }
   if (result.error) throw result.error;
   const data = result.data ?? [];
   return data.map((row: any) => ({
@@ -185,6 +196,7 @@ export async function fetchDailyReports() {
     upcomingProjects: row.upcoming_projects ?? undefined,
     growthIdeas: row.growth_ideas ?? undefined,
     challenges: row.challenges ?? undefined,
+    fundsDestination: row.funds_destination ?? undefined,
     summary: row.summary ?? "",
     status: statusFromDb[row.status as DbReportStatus],
     priority: priorityFromDb[row.priority as DbReportPriority]

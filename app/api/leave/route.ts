@@ -1,18 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import { leaveRequestError, leaveRules, workingDays, type LeaveCode } from "@/lib/ims/leave-rules";
 import { isCaller, requireCaller } from "@/lib/ims/require-user";
+import { admin, peopleAccessScope } from "@/lib/ims/service-server";
+
+const LEAVE_SELECT =
+  "id, leave_type, start_date, end_date, working_days, pay_status, status, decision_note, created_at, staff(id, full_name, staff_number, status, annual_leave_days, department_id, departments(name))";
 
 export async function GET(request: NextRequest) {
   const caller = await requireCaller(request);
   if (!isCaller(caller)) return NextResponse.json({ error: caller.error }, { status: caller.status });
 
-  const { data, error } = await caller.supabase
-    .from("leave_requests")
-    .select("id, leave_type, start_date, end_date, working_days, pay_status, status, decision_note, created_at, staff(id, full_name, staff_number, status, annual_leave_days, departments(name))")
-    .order("created_at", { ascending: false });
+  const db = ["executive_director", "director_of_administration", "human_resources", "chairman", "managing_director"].includes(caller.role)
+    ? admin()
+    : caller.supabase;
+  const access = await peopleAccessScope(caller, db);
 
+  if (access.departmentIds && access.departmentIds.length === 0) {
+    return NextResponse.json({ requests: [] });
+  }
+
+  let query = db.from("leave_requests").select(LEAVE_SELECT).order("created_at", { ascending: false }).limit(200);
+  if (access.departmentIds) {
+    const { data: staffRows } = await db.from("staff").select("id").in("department_id", access.departmentIds);
+    const staffIds = (staffRows ?? []).map((row) => row.id as string);
+    if (!staffIds.length) return NextResponse.json({ requests: [] });
+    query = query.in("staff_id", staffIds);
+  }
+
+  const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ requests: data ?? [] });
+  const rank = (status: string) =>
+    status === "pending_executive_director" || status === "pending_director_of_administration" ? 0 : 1;
+  const requests = [...(data ?? [])].sort((a, b) => rank(a.status) - rank(b.status));
+  return NextResponse.json({ requests });
 }
 
 export async function POST(request: NextRequest) {

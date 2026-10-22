@@ -23,6 +23,15 @@ import { applyReportDecision, createAsset, createDailyReport, createMarketingLea
 import { PeopleOffice } from "@/app/components/people-office";
 import { AdminDashboard } from "@/app/components/admin-dashboard";
 import { KpiOffice } from "@/app/components/kpi-office";
+import { ServiceHome } from "@/app/components/service-home";
+import { RequestsOffice } from "@/app/components/requests-office";
+import { DirectoryOffice } from "@/app/components/directory-office";
+import { AnnouncementsOffice } from "@/app/components/announcements-office";
+import { CashOffice } from "@/app/components/cash-office";
+import { SuiteOffice } from "@/app/components/suite-office";
+import { AssetHistory } from "@/app/components/asset-history";
+import { isBankingFinance, isSuiteDepartment } from "@/lib/ims/service";
+import { fundsDestinationLabel, reportFinance } from "@/lib/ims/report-finance";
 
 type Role =
   | "chairman"
@@ -38,6 +47,12 @@ type Department = string;
 type SubmissionStatus = "Draft" | "Pending Chairman Review" | "Approved" | "Returned";
 type Tone = "blue" | "green" | "amber" | "red" | "slate";
 type PageId =
+  | "Home"
+  | "Requests"
+  | "Directory"
+  | "Announcements"
+  | "Cash Book"
+  | "Check-ins"
   | "Executive Dashboard"
   | "Approval Queue"
   | "Department Reports"
@@ -67,8 +82,10 @@ type Session = {
   department?: Department;
   userId?: string;
   departmentId?: string;
+  departmentCode?: string;
   subsidiaryId?: string;
   subsidiaryName?: string;
+  subsidiaryCode?: string;
 };
 
 type DepartmentSubmission = {
@@ -94,6 +111,7 @@ type DepartmentSubmission = {
   upcomingProjects?: string;
   growthIdeas?: string;
   challenges?: string;
+  fundsDestination?: string;
   summary: string;
   status: SubmissionStatus;
   priority: "Normal" | "Attention" | "Critical";
@@ -212,6 +230,15 @@ function writesDepartmentReports(role: Role) {
   return role === "department-head" || role === "manager";
 }
 
+function writesDepartmentAssets(role: Role) {
+  return role === "department-head" || role === "manager";
+}
+
+function reportStatusLabel(status: SubmissionStatus) {
+  if (status === "Pending Chairman Review") return "Pending Executive Director";
+  return status;
+}
+
 function placeLabel(department?: string, subsidiary?: string) {
   if (subsidiary && department) return `${subsidiary} · ${department}`;
   return department || "";
@@ -229,33 +256,121 @@ const departments: Department[] = [
 ];
 
 
+const serviceLanePages: PageId[] = ["Home", "Requests", "Directory", "Announcements", "Cash Book", "Check-ins"];
+
+function isServiceLanePage(page: PageId) {
+  return serviceLanePages.includes(page);
+}
+
 const rolePages: Record<Role, PageId[]> = {
-  chairman: ["Executive Dashboard", "Approval Queue", "Department Reports", "Staff Register", "Staff Applications", "Leave", "Letters", "Assets", "Users"],
-  "managing-director": ["Staff Register", "Staff Applications", "Leave", "Letters"],
+  chairman: [
+    "Home",
+    "Executive Dashboard",
+    "Approval Queue",
+    "Department Reports",
+    "Requests",
+    "Directory",
+    "Announcements",
+    "Cash Book",
+    "Check-ins",
+    "Staff Register",
+    "Staff Applications",
+    "Leave",
+    "Letters",
+    "Assets",
+    "Users"
+  ],
+  "managing-director": ["Home", "Requests", "Directory", "Announcements", "Staff Register", "Staff Applications", "Leave", "Letters"],
   "executive-director": [
+    "Home",
     "Operations Overview",
     "Department Reports",
     "Department Compliance",
     "Exceptions",
     "Marketing Pipeline",
     "Assets",
+    "Requests",
+    "Directory",
+    "Announcements",
+    "Cash Book",
+    "Check-ins",
     "Staff Register",
     "Leave",
     "Directorate KPIs"
   ],
-  "general-manager": ["Operations Overview", "Department Compliance", "Exceptions", "Marketing Pipeline", "Staff Register", "Staff Applications", "Assets", "Users"],
-  "director-of-administration": ["Admin Dashboard", "Directorate KPIs", "Staff Register", "Staff Applications", "Leave", "Letters", "Users"],
-  "human-resources": ["Staff Register", "Staff Applications", "Leave", "Letters"],
-  "department-head": ["Daily Submission", "My Reports", "Returned Items", "Directorate KPIs"],
-  manager: ["Daily Submission", "My Reports", "Returned Items", "Directorate KPIs"],
-  "marketing-officer": ["Client Visits", "Proposals", "Quotations", "Lead Assignment"]
+  "general-manager": [
+    "Home",
+    "Operations Overview",
+    "Department Compliance",
+    "Exceptions",
+    "Marketing Pipeline",
+    "Requests",
+    "Directory",
+    "Announcements",
+    "Cash Book",
+    "Check-ins",
+    "Staff Register",
+    "Staff Applications",
+    "Assets",
+    "Users"
+  ],
+  "director-of-administration": [
+    "Home",
+    "Admin Dashboard",
+    "Directorate KPIs",
+    "Requests",
+    "Directory",
+    "Announcements",
+    "Cash Book",
+    "Check-ins",
+    "Staff Register",
+    "Staff Applications",
+    "Leave",
+    "Letters",
+    "Users"
+  ],
+  "human-resources": ["Home", "Requests", "Directory", "Announcements", "Staff Register", "Staff Applications", "Leave", "Letters"],
+  "department-head": [
+    "Home",
+    "Requests",
+    "Daily Submission",
+    "My Reports",
+    "Returned Items",
+    "Directory",
+    "Announcements",
+    "Cash Book",
+    "Check-ins",
+    "Assets",
+    "Directorate KPIs"
+  ],
+  manager: [
+    "Home",
+    "Requests",
+    "Daily Submission",
+    "My Reports",
+    "Returned Items",
+    "Directory",
+    "Announcements",
+    "Cash Book",
+    "Check-ins",
+    "Assets",
+    "Directorate KPIs"
+  ],
+  "marketing-officer": ["Home", "Requests", "Client Visits", "Proposals", "Quotations", "Lead Assignment", "Directory", "Announcements"]
 };
 
 const mobileFieldRoles: Role[] = ["department-head", "manager", "marketing-officer"];
 
 const mobileNavLabels: Partial<Record<PageId, string>> = {
+  Home: "Home",
+  Requests: "Requests",
+  Directory: "People",
+  Announcements: "News",
+  "Cash Book": "Cash",
+  "Check-ins": "Suites",
   "Daily Submission": "Submit",
   "My Reports": "Reports",
+  Assets: "Assets",
   "Returned Items": "Returned",
   "Directorate KPIs": "KPIs",
   "Client Visits": "Visits",
@@ -263,6 +378,52 @@ const mobileNavLabels: Partial<Record<PageId, string>> = {
   Quotations: "Quotes",
   "Lead Assignment": "Leads"
 };
+
+function compactNavItems(session: Session, department?: DepartmentRow | null): PageId[] | null {
+  if (session.role === "department-head" || session.role === "manager") {
+    const desk = stewardshipDepartment(session, department);
+    if (isSuiteDepartment(desk)) return ["Home", "Requests", "Check-ins", "Directory", "My Reports"];
+    if (isBankingFinance(desk)) return ["Home", "Requests", "Cash Book", "Directory", "My Reports"];
+    return ["Home", "Requests", "Daily Submission", "Directory", "My Reports"];
+  }
+  if (session.role === "marketing-officer") {
+    return ["Home", "Requests", "Client Visits", "Quotations", "Lead Assignment"];
+  }
+  return null;
+}
+
+function stewardshipDepartment(session: Session, department?: DepartmentRow | null) {
+  return {
+    code: department?.code ?? session.departmentCode,
+    name: department?.name ?? session.department,
+    subsidiaryCode: department?.subsidiaryCode ?? session.subsidiaryCode,
+    subsidiaryName: department?.subsidiaryName ?? session.subsidiaryName
+  };
+}
+
+function pagesForSession(session: Session, department?: DepartmentRow | null): PageId[] {
+  const desk = stewardshipDepartment(session, department);
+  const field = session.role === "manager" || session.role === "department-head";
+  const banking = isBankingFinance(desk);
+  const suite = isSuiteDepartment(desk);
+  const executiveOversight =
+    session.role === "chairman" || session.role === "general-manager" || session.role === "director-of-administration";
+  const edBanking = session.role === "executive-director" && (banking || desk.subsidiaryCode === "BIF");
+  const edSuite = session.role === "executive-director" && (suite || desk.subsidiaryCode === "CON");
+  return rolePages[session.role].filter((page) => {
+    if (page === "Cash Book") {
+      if (field) return banking;
+      if (session.role === "executive-director") return edBanking;
+      return executiveOversight;
+    }
+    if (page === "Check-ins") {
+      if (field) return suite;
+      if (session.role === "executive-director") return edSuite;
+      return executiveOversight;
+    }
+    return true;
+  });
+}
 
 function isMobileFieldRole(role: Role) {
   return mobileFieldRoles.includes(role);
@@ -508,13 +669,15 @@ export default function Home() {
   const [busyMessage, setBusyMessage] = useState("");
   const [summaryData, setSummaryData] = useState<ExecutiveSummaryData | null>(null);
   const [showSummaryPreview, setShowSummaryPreview] = useState(false);
-  const [activePage, setActivePage] = useState<PageId>("Executive Dashboard");
+  const [activePage, setActivePage] = useState<PageId>("Home");
+  const [requestStartNew, setRequestStartNew] = useState(false);
   const [selectedSubsidiary, setSelectedSubsidiary] = useState<string>("All");
   const [selectedDepartment, setSelectedDepartment] = useState<Department | "All">("All");
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [returnTargetId, setReturnTargetId] = useState<string | null>(null);
   const [returnComment, setReturnComment] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const autoAlertedSessionRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -542,8 +705,10 @@ export default function Home() {
           department: next.department as Department | undefined,
           userId: next.userId,
           departmentId: next.departmentId ?? undefined,
+          departmentCode: next.departmentCode ?? undefined,
           subsidiaryId: next.subsidiaryId ?? undefined,
-          subsidiaryName: next.subsidiaryName ?? undefined
+          subsidiaryName: next.subsidiaryName ?? undefined,
+          subsidiaryCode: next.subsidiaryCode ?? undefined
         });
         setActivePage(rolePages[next.role][0]);
       } catch {
@@ -749,7 +914,8 @@ export default function Home() {
         growthIdeas: submission.growthIdeas,
         challenges: submission.challenges,
         summary: submission.summary,
-        parentReportId: submission.parentReportId ?? null
+        parentReportId: submission.parentReportId ?? null,
+        fundsDestination: submission.fundsDestination ?? null
       });
       await refreshImsData();
       return created;
@@ -780,8 +946,16 @@ export default function Home() {
   }
 
   async function addAssetRecord(asset: AssetRecord) {
-    const departmentId = departmentIdByName(asset.department_id);
-    if (!departmentId) throw new Error("Asset department was not found.");
+    const departmentId = writesDepartmentAssets(session?.role ?? "chairman")
+      ? session?.departmentId ?? departmentIdByName(asset.department_id)
+      : departmentIdByName(asset.department_id);
+    if (!departmentId) {
+      throw new Error(
+        writesDepartmentAssets(session?.role ?? "chairman")
+          ? "Your login is not linked to a department yet."
+          : "Asset department was not found."
+      );
+    }
     setBusyMessage("Saving asset...");
     try {
       await createAsset({
@@ -919,17 +1093,33 @@ export default function Home() {
 
   const fieldMobile = isMobileFieldRole(session.role);
   const goToPage = (page: PageId) => {
+    setRequestStartNew(false);
     setActivePage(page);
     setSelectedDepartment("All");
     setSelectedReportId(null);
     setShowNotifications(false);
+    setShowMobileMenu(false);
   };
+  const sessionDepartment = departmentRows.find((item) => item.id === session.departmentId);
+  const visiblePages = pagesForSession(session, sessionDepartment);
+  const cashRelevant = visiblePages.includes("Cash Book");
+  const suiteRelevant = visiblePages.includes("Check-ins");
+  const stewardshipDepartments =
+    session.role === "manager" || session.role === "department-head"
+      ? departmentRows.filter((item) => item.id === session.departmentId)
+      : session.role === "executive-director"
+        ? scopedDepartmentRows
+        : departmentRows;
+  if (activePage !== "Home" && !visiblePages.includes(activePage)) {
+    setActivePage("Home");
+  }
 
   return (
     <main className={cx("min-h-screen bg-white text-slate-900", fieldMobile && "field-mobile-shell")}>
       <div className="flex min-h-screen">
         <Sidebar
           session={session}
+          pages={visiblePages}
           activePage={activePage}
           onPageChange={goToPage}
           onLogout={handleLogout}
@@ -942,18 +1132,48 @@ export default function Home() {
             showNotifications={canReceiveNotifications}
             notificationCount={sessionNotifications.filter((notification) => !notification.read).length}
             onToggleNotifications={() => setShowNotifications((current) => !current)}
-            onLogout={fieldMobile ? handleLogout : undefined}
+            onOpenMenu={() => setShowMobileMenu(true)}
           />
           <div
             className={cx(
               "mx-auto min-w-0 max-w-[1500px]",
-              fieldMobile ? "px-4 py-4 pb-8 sm:px-5" : "px-6 py-6"
+              fieldMobile ? "px-3 py-3 sm:px-5 sm:py-4" : "px-6 py-6"
             )}
           >
             {busyMessage && (
               <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-900">
                 {busyMessage}
               </div>
+            )}
+            {activePage === "Home" && (
+              <ServiceHome
+                name={session.name}
+                roleLabel={roleLabels[session.role]}
+                canSubmitReports={writesDepartmentReports(session.role)}
+                showCash={cashRelevant}
+                showCheckins={suiteRelevant}
+                directoryScope={session.role === "executive-director" ? "subsidiary" : "department"}
+                showDepartmentAccounts={session.role === "executive-director"}
+                onOpen={(page) => goToPage(page)}
+                onNewRequest={() => {
+                  goToPage("Requests");
+                  setRequestStartNew(true);
+                }}
+              />
+            )}
+            {activePage === "Requests" && (
+              <RequestsOffice
+                startNew={requestStartNew}
+                canRequestForTeam={session.role === "manager" || session.role === "department-head"}
+              />
+            )}
+            {activePage === "Directory" && <DirectoryOffice />}
+            {activePage === "Announcements" && <AnnouncementsOffice />}
+            {activePage === "Cash Book" && (
+              <CashOffice departments={stewardshipDepartments} departmentId={session.departmentId} />
+            )}
+            {activePage === "Check-ins" && (
+              <SuiteOffice departments={stewardshipDepartments} departmentId={session.departmentId} />
             )}
             {session.role === "chairman" && activePage === "Executive Dashboard" && (
               <ChairmanDashboard
@@ -1008,13 +1228,25 @@ export default function Home() {
             {session.role === "chairman" && activePage === "Department Reports" && (
               <DepartmentReportsPage submissions={submissions} approvalActions={approvalActions} departmentRows={departmentRows} onReportOpen={setSelectedReportId} />
             )}
-            {(session.role === "chairman" || session.role === "general-manager" || session.role === "executive-director") &&
+            {(session.role === "chairman" ||
+              session.role === "general-manager" ||
+              session.role === "executive-director" ||
+              writesDepartmentAssets(session.role)) &&
               activePage === "Assets" && (
               <AssetsPage
                 assets={session.role === "executive-director" ? scopedAssets : assetRows}
-                departments={session.role === "executive-director" ? scopedDepartmentRows : departmentRows}
+                departments={
+                  writesDepartmentAssets(session.role)
+                    ? sessionDepartment
+                      ? [sessionDepartment]
+                      : []
+                    : session.role === "executive-director"
+                      ? scopedDepartmentRows
+                      : departmentRows
+                }
                 onCreate={addAssetRecord}
-                readOnly={session.role === "executive-director"}
+                readOnly={!writesDepartmentAssets(session.role)}
+                lockDepartment={writesDepartmentAssets(session.role) ? sessionDepartment : undefined}
               />
             )}
             {(session.role === "chairman" || session.role === "general-manager" || session.role === "director-of-administration") && activePage === "Users" && (
@@ -1026,11 +1258,21 @@ export default function Home() {
                 approvalActions={approvalActions.filter((item) => !session.subsidiaryName || item.subsidiary === session.subsidiaryName)}
                 departmentRows={scopedDepartmentRows}
                 onReportOpen={setSelectedReportId}
+                onStatusChange={async (id, status) => {
+                  try {
+                    await updateSubmissionStatus(id, status);
+                  } catch (error) {
+                    window.alert(error instanceof Error ? error.message : "Failed to update report");
+                  }
+                }}
+                onReturnRequest={requestReportReturn}
+                showActions
                 title="Subsidiary Department Reports"
-                subtitle={`Daily reports across ${session.subsidiaryName || "your subsidiary"}. You can approve or return reports from your departments.`}
+                subtitle={`Daily reports across ${session.subsidiaryName || "your subsidiary"}. Approve them or return them to the manager. The Chairman can see this flow.`}
               />
             )}
             {(session.role === "general-manager" || session.role === "executive-director") &&
+              !isServiceLanePage(activePage) &&
               activePage !== "Users" &&
               activePage !== "Assets" &&
               activePage !== "Staff Register" &&
@@ -1059,7 +1301,10 @@ export default function Home() {
                 departmentRows={session.role === "executive-director" ? scopedDepartmentRows : departmentRows}
               />
             )}
-            {writesDepartmentReports(session.role) && (
+            {writesDepartmentReports(session.role) &&
+              !isServiceLanePage(activePage) &&
+              activePage !== "Directorate KPIs" &&
+              activePage !== "Assets" && (
               <DepartmentHeadPortal
                 activePage={activePage}
                 session={session}
@@ -1069,7 +1314,7 @@ export default function Home() {
                 onPageChange={goToPage}
               />
             )}
-            {session.role === "marketing-officer" && (
+            {session.role === "marketing-officer" && !isServiceLanePage(activePage) && (
               <MarketingPortal activePage={activePage} leads={leads} departments={departmentRows} onSubmit={addLead} />
             )}
             {session.role === "director-of-administration" && activePage === "Admin Dashboard" && (
@@ -1082,6 +1327,7 @@ export default function Home() {
               <KpiOffice
                 canSetTarget={session.role === "director-of-administration"}
                 departmentId={session.departmentId}
+                subsidiaryId={session.role === "executive-director" ? session.subsidiaryId ?? undefined : undefined}
               />
             )}
             {(activePage === "Staff Register" || activePage === "Staff Applications" || activePage === "Leave" || activePage === "Letters") && (
@@ -1090,6 +1336,11 @@ export default function Home() {
                 role={session.role}
                 canWritePeople={session.role === "director-of-administration" || session.role === "human-resources"}
                 canApproveLeave={session.role === "executive-director" || session.role === "director-of-administration"}
+                subsidiaryId={
+                  session.role === "executive-director"
+                    ? session.subsidiaryId || sessionDepartment?.subsidiaryId || undefined
+                    : undefined
+                }
               />
             )}
           </div>
@@ -1098,6 +1349,7 @@ export default function Home() {
       {fieldMobile && (
         <MobileFieldNav
           session={session}
+          department={sessionDepartment}
           activePage={activePage}
           onPageChange={goToPage}
           badges={{
@@ -1107,6 +1359,16 @@ export default function Home() {
                 item.status === "Returned"
             ).length
           }}
+        />
+      )}
+      {showMobileMenu && (
+        <MobileMenuSheet
+          session={session}
+          pages={visiblePages}
+          activePage={activePage}
+          onPageChange={goToPage}
+          onClose={() => setShowMobileMenu(false)}
+          onLogout={handleLogout}
         />
       )}
       {showNotifications && canReceiveNotifications && (
@@ -1237,8 +1499,10 @@ function LoginScreen({ onLogin }: { onLogin: (session: Session) => void }) {
         department: next.department as Department | undefined,
         userId: next.userId,
         departmentId: next.departmentId ?? undefined,
+        departmentCode: next.departmentCode ?? undefined,
         subsidiaryId: next.subsidiaryId ?? undefined,
-        subsidiaryName: next.subsidiaryName ?? undefined
+        subsidiaryName: next.subsidiaryName ?? undefined,
+        subsidiaryCode: next.subsidiaryCode ?? undefined
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed");
@@ -1260,9 +1524,9 @@ function LoginScreen({ onLogin }: { onLogin: (session: Session) => void }) {
             view of revenue, operations, and development briefs across every arm.
           </p>
           <div className="mt-8 grid gap-3 sm:grid-cols-3">
-            <LoginPoint title="Daily Department Reports" text="Heads submit activity, revenue, and development briefs each day." />
-            <LoginPoint title="Review & Approval" text="The Chairman reviews, approves, or returns reports for correction." />
-            <LoginPoint title="Executive Oversight" text="The General Manager monitors operations; the Chairman generates the executive summary." />
+            <LoginPoint title="Daily Department Reports" text="Managers submit activity, revenue, and development briefs to their Executive Director." />
+            <LoginPoint title="Review & Approval" text="The Executive Director approves or returns reports. The Chairman can see the full flow." />
+            <LoginPoint title="Executive Oversight" text="The General Manager monitors operations; the Chairman follows every report through to decision." />
           </div>
         </section>
 
@@ -1331,29 +1595,31 @@ function LoginScreen({ onLogin }: { onLogin: (session: Session) => void }) {
 
 function Sidebar({
   session,
+  pages,
   activePage,
   onPageChange,
   onLogout
 }: {
   session: Session;
+  pages: PageId[];
   activePage: PageId;
   onPageChange: (page: PageId) => void;
   onLogout: () => void;
 }) {
-  const items = rolePages[session.role];
+  const items = pages;
   return (
-    <aside className="sticky top-0 hidden h-screen w-72 shrink-0 border-r border-slate-200 bg-white lg:flex lg:flex-col">
-      <div className="border-b border-slate-200 px-6 py-5">
+    <aside className="sticky top-0 hidden h-dvh max-h-dvh w-72 shrink-0 self-start overflow-hidden border-r border-slate-200 bg-white lg:flex lg:flex-col">
+      <div className="shrink-0 border-b border-slate-200 px-5 py-4">
         <BrandMark size="sm" />
-        <p className="mt-3 text-xs text-slate-500">Executive information system</p>
+        <p className="mt-2 text-xs text-slate-500">Executive information system</p>
       </div>
-      <nav className="flex-1 space-y-1 px-4 py-5">
+      <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain px-3 py-3">
         {items.map((item) => (
           <button
             key={item}
             onClick={() => onPageChange(item)}
             className={cx(
-              "w-full rounded-xl px-4 py-3 text-left text-sm font-medium transition",
+              "w-full rounded-xl px-3 py-2 text-left text-sm font-medium transition",
               activePage === item ? "bg-blue-50 text-blue-900" : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
             )}
           >
@@ -1361,13 +1627,13 @@ function Sidebar({
           </button>
         ))}
       </nav>
-      <div className="border-t border-slate-200 p-4">
-        <div className="rounded-2xl bg-slate-50 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Signed in as</p>
+      <div className="shrink-0 border-t border-slate-200 bg-white p-3">
+        <div className="rounded-2xl bg-slate-50 px-3 py-2.5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Signed in as</p>
           <p className="mt-1 text-sm font-semibold text-slate-950">{roleLabels[session.role]}</p>
-          <p className="mt-1 text-xs text-slate-500">{session.name}</p>
+          <p className="mt-0.5 truncate text-xs text-slate-500">{session.name}</p>
         </div>
-        <button onClick={onLogout} className="mt-3 w-full rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+        <button onClick={onLogout} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
           Sign out
         </button>
       </div>
@@ -1375,22 +1641,81 @@ function Sidebar({
   );
 }
 
+function NavGlyph({ page }: { page: PageId }) {
+  const common = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", "aria-hidden": true as const };
+  if (page === "Home") {
+    return (
+      <svg {...common}>
+        <path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1v-9.5Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (page === "Requests") {
+    return (
+      <svg {...common}>
+        <path d="M7 4h10a2 2 0 0 1 2 2v14l-4-2-3 2-3-2-4 2V6a2 2 0 0 1 2-2Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (page === "Daily Submission") {
+    return (
+      <svg {...common}>
+        <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (page === "Directory") {
+    return (
+      <svg {...common}>
+        <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <circle cx="10" cy="8" r="3" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M20 21v-2a3.5 3.5 0 0 0-2.5-3.3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M16 4.5a3 3 0 0 1 0 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (page === "Cash Book") {
+    return (
+      <svg {...common}>
+        <rect x="4" y="6" width="16" height="13" rx="2" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M8 10h8M8 14h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (page === "Check-ins") {
+    return (
+      <svg {...common}>
+        <path d="M5 11h14v9H5v-9Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+        <path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path d="M5 19V5h14v14H5Z" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M8 15h8M8 11h8M8 7h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function MobileFieldNav({
   session,
+  department,
   activePage,
   onPageChange,
   badges
 }: {
   session: Session;
+  department?: DepartmentRow | null;
   activePage: PageId;
   onPageChange: (page: PageId) => void;
   badges?: Partial<Record<PageId, number>>;
 }) {
-  const items = rolePages[session.role];
+  const items = compactNavItems(session, department) ?? rolePages[session.role];
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pt-2 backdrop-blur lg:hidden"
-      style={{ paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))" }}
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-1 pt-1 backdrop-blur lg:hidden"
+      style={{ paddingBottom: "calc(0.35rem + env(safe-area-inset-bottom, 0px))" }}
     >
       <div className="mx-auto grid max-w-lg" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
         {items.map((item) => {
@@ -1401,15 +1726,16 @@ function MobileFieldNav({
               key={item}
               onClick={() => onPageChange(item)}
               className={cx(
-                "relative flex min-h-14 flex-col items-center justify-center rounded-xl px-1 py-2 text-center transition",
+                "relative flex min-h-[3.6rem] flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1.5 text-center transition",
                 active ? "bg-blue-50 text-blue-900" : "text-slate-500"
               )}
             >
-              <span className={cx("text-[13px] font-semibold leading-tight", active && "text-blue-900")}>
+              <NavGlyph page={item} />
+              <span className={cx("text-[10px] font-semibold leading-tight", active && "text-blue-900")}>
                 {mobileNavLabels[item] ?? item}
               </span>
               {badge > 0 && (
-                <span className="absolute right-2 top-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                <span className="absolute right-1.5 top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[10px] font-bold text-white">
                   {badge > 9 ? "9+" : badge}
                 </span>
               )}
@@ -1428,7 +1754,7 @@ function Topbar({
   showNotifications,
   notificationCount,
   onToggleNotifications,
-  onLogout
+  onOpenMenu
 }: {
   session: Session;
   pageTitle?: PageId;
@@ -1436,32 +1762,47 @@ function Topbar({
   showNotifications: boolean;
   notificationCount: number;
   onToggleNotifications: () => void;
-  onLogout?: () => void;
+  onOpenMenu?: () => void;
 }) {
   return (
     <header
       className={cx(
         "sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur",
-        compact ? "px-4 py-3 sm:px-5" : "px-6 py-4"
+        compact ? "px-3 py-2.5 sm:px-5" : "px-4 py-4 lg:px-6"
       )}
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
-            {roleLabels[session.role]}
-            {session.department ? ` · ${session.department}` : ""}
-          </p>
-          <h2
-            className={cx(
-              "truncate font-semibold tracking-tight text-slate-950",
-              compact ? "text-lg sm:text-xl" : "text-2xl"
-            )}
-          >
-            {pageTitle ?? session.name}
-          </h2>
-          {pageTitle && (
-            <p className="mt-0.5 truncate text-xs text-slate-500">{session.name}</p>
+        <div className="flex min-w-0 items-center gap-2">
+          {onOpenMenu && (
+            <button
+              type="button"
+              onClick={onOpenMenu}
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-800 lg:hidden"
+              aria-label="Open menu"
+            >
+              <span className="sr-only">Open menu</span>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </button>
           )}
+          <div className="min-w-0">
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+              {roleLabels[session.role]}
+              {session.department ? ` · ${session.department}` : ""}
+            </p>
+            <h2
+              className={cx(
+                "truncate font-semibold tracking-tight text-slate-950",
+                compact ? "text-lg sm:text-xl" : "text-xl lg:text-2xl"
+              )}
+            >
+              {pageTitle ?? session.name}
+            </h2>
+            {pageTitle && (
+              <p className={cx("mt-0.5 truncate text-xs text-slate-500", compact && "hidden sm:block")}>{session.name}</p>
+            )}
+          </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           {showNotifications && (
@@ -1475,17 +1816,62 @@ function Topbar({
               {notificationCount > 0 ? `${notificationCount} new` : "Alerts"}
             </button>
           )}
-          {onLogout && (
-            <button
-              onClick={onLogout}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 sm:text-sm lg:hidden"
-            >
-              Sign out
-            </button>
-          )}
         </div>
       </div>
     </header>
+  );
+}
+
+function MobileMenuSheet({
+  session,
+  pages,
+  activePage,
+  onPageChange,
+  onClose,
+  onLogout
+}: {
+  session: Session;
+  pages: PageId[];
+  activePage: PageId;
+  onPageChange: (page: PageId) => void;
+  onClose: () => void;
+  onLogout: () => void;
+}) {
+  const items = pages;
+  return (
+    <div className="fixed inset-0 z-[70] lg:hidden">
+      <button type="button" className="absolute inset-0 bg-slate-950/45" aria-label="Close menu" onClick={onClose} />
+      <aside className="absolute inset-y-0 left-0 flex h-dvh max-h-dvh w-[min(20rem,88vw)] flex-col overflow-hidden bg-white shadow-2xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-4">
+          <BrandMark size="sm" />
+          <button type="button" className="secondary-button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain px-3 py-3">
+          {items.map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => onPageChange(item)}
+              className={cx(
+                "w-full rounded-xl px-4 py-3 text-left text-sm font-medium",
+                activePage === item ? "bg-blue-50 text-blue-900" : "text-slate-700 hover:bg-slate-50"
+              )}
+            >
+              {item}
+            </button>
+          ))}
+        </nav>
+        <div className="shrink-0 border-t border-slate-200 bg-white p-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{roleLabels[session.role]}</p>
+          <p className="mt-1 truncate text-sm text-slate-700">{session.name}</p>
+          <button type="button" onClick={onLogout} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700">
+            Sign out
+          </button>
+        </div>
+      </aside>
+    </div>
   );
 }
 
@@ -1511,11 +1897,13 @@ function ReportOverview({
   onReturnRequest: () => void;
 }) {
   const canExecutiveAct =
-    (session.role === "chairman" || session.role === "general-manager" || session.role === "executive-director") &&
+    session.role === "executive-director" &&
     report.status !== "Draft" &&
     report.status !== "Approved";
 
   const fieldView = isMobileFieldRole(session.role);
+  const finance = reportFinance({ name: report.department });
+  const destination = fundsDestinationLabel(report.fundsDestination, report.department);
 
   return (
     <section
@@ -1544,9 +1932,13 @@ function ReportOverview({
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <PositionTile label="Revenue" value={formatNaira(report.revenue)} tone="green" />
-        <PositionTile label="Cash-In" value={formatNaira(report.cashIn)} tone="blue" />
-        <PositionTile label="Expenses" value={formatNaira(report.expenses)} tone="amber" />
+        {finance.showBilled && (
+          <PositionTile label={finance.billedLabel} value={formatNaira(report.revenue)} tone="green" />
+        )}
+        {finance.showCollected && (
+          <PositionTile label={finance.collectedLabel} value={formatNaira(report.cashIn)} tone="blue" />
+        )}
+        <PositionTile label={finance.spentLabel} value={formatNaira(report.expenses)} tone="amber" />
         <PositionTile label="Operations" value={report.activeOperations.toString()} tone="slate" />
         <PositionTile label="Asset Alerts" value={report.assetsFlagged.toString()} tone={report.assetsFlagged ? "red" : "green"} />
       </div>
@@ -1559,6 +1951,7 @@ function ReportOverview({
             <ReportDetail label="Jobs completed" value={report.jobsCompleted ?? "Not supplied"} />
             <ReportDetail label="Jobs in progress" value={report.jobsInProgress ?? "Not supplied"} />
             <ReportDetail label="Equipment/system status" value={report.equipmentStatus?.join(", ") ?? "Not supplied"} />
+            {destination ? <ReportDetail label="Where collections sit" value={destination} /> : null}
           </dl>
           <div className="mt-5 grid gap-4 xl:grid-cols-2">
             <NarrativeBlock title="Department update and current activities" text={report.departmentUpdate} />
@@ -1573,8 +1966,8 @@ function ReportOverview({
           </div>
           {canExecutiveAct && (
             <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50 p-4">
-              <p className="text-sm font-semibold text-blue-950">Executive decision</p>
-              <p className="mt-1 text-sm text-blue-800">Approve this report or return it to the department head for correction.</p>
+              <p className="text-sm font-semibold text-blue-950">Executive Director decision</p>
+              <p className="mt-1 text-sm text-blue-800">Approve this report or return it to the manager for correction. The Chairman can see this decision.</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   onClick={() => onStatusChange("Approved")}
@@ -1586,6 +1979,12 @@ function ReportOverview({
                   Return for Correction
                 </button>
               </div>
+            </div>
+          )}
+          {(session.role === "chairman" || session.role === "general-manager") &&
+            report.status === "Pending Chairman Review" && (
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+              This report is with the Executive Director. You can follow the flow here; the first approve or return sits with that office.
             </div>
           )}
           {(session.role === "general-manager" || session.role === "chairman" || session.role === "executive-director") &&
@@ -1608,7 +2007,7 @@ function ReportOverview({
         </Panel>
 
         {writesDepartmentReports(session.role) ? (
-          <Panel title="Chairman Messages" subtitle="Approval and correction messages sent to your department.">
+          <Panel title="Review messages" subtitle="Approval and correction notes from your Executive Director.">
             {reportNotifications.length ? (
               <div className="space-y-3">
                 {reportNotifications.map((notification) => (
@@ -1622,7 +2021,7 @@ function ReportOverview({
                 ))}
               </div>
             ) : (
-              <EmptyState title="No messages for this report" text="Chairman approval and correction notes will appear here." />
+              <EmptyState title="No messages for this report" text="Executive Director approval and correction notes will appear here." />
             )}
           </Panel>
         ) : (
@@ -1700,7 +2099,7 @@ function ChairmanDashboard({
     <div className="space-y-6">
       <PageTitle
         title="Chairman Executive Dashboard"
-        subtitle="A single administrative page for reviewing every departmental submission, approval status, revenue row, exception, and marketing lead."
+        subtitle="A single administrative page for reviewing every departmental submission, approval status, billed row, exception, and marketing lead."
         action={
           <button type="button" onClick={onGenerateSummary} className="primary-button">Generate Executive Summary</button>
         }
@@ -1709,7 +2108,7 @@ function ChairmanDashboard({
       <div ref={summaryRef}>
         <Panel
           title="Executive Summary PDF"
-          subtitle="Generate a professional Chairman brief with department revenue, reports, and development briefs."
+          subtitle="Generate a professional Chairman brief with department pulse, reports, and development briefs."
         >
           {summaryData ? (
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-4">
@@ -1717,7 +2116,7 @@ function ChairmanDashboard({
                 <p className="text-sm font-semibold text-slate-950">Summary ready for review</p>
                 <p className="mt-1 text-sm text-slate-600">
                   Generated {new Date(summaryData.generatedAt).toLocaleString("en-GB")} Â· {summaryData.departmentsReporting} departments Â·{" "}
-                  {formatNaira(summaryData.totalRevenue)} consolidated revenue
+                  {formatNaira(summaryData.totalRevenue)} billed across departments
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
@@ -1737,25 +2136,25 @@ function ChairmanDashboard({
 
       <MetricGrid>
         <MetricCard label="Departments Reporting" value={`${new Set(metrics.submitted.map((item) => placeLabel(item.department, item.subsidiary))).size}/${departmentRows.length || departments.length}`} tone="blue" />
-        <MetricCard label="Pending Chairman Review" value={metrics.pending.length.toString()} tone="amber" />
-        <MetricCard label="Consolidated Revenue" value={formatNaira(metrics.totalRevenue)} tone="green" />
+        <MetricCard label="Pending Executive Director" value={metrics.pending.length.toString()} tone="amber" />
+        <MetricCard label="Billed across departments" value={formatNaira(metrics.totalRevenue)} tone="green" />
         <MetricCard label="Asset / Equipment Alerts" value={metrics.alerts.toString()} tone="red" />
       </MetricGrid>
 
-      <Panel title="Executive Position Infographics" subtitle="High-level position for Chairman review before opening the approval queue.">
+      <Panel title="Executive Position Infographics" subtitle="High-level position so the Chairman can follow every report through Executive Director review.">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <PositionTile label="Cash-In Reported" value={formatNaira(metrics.totalCash)} tone="green" />
-          <PositionTile label="Expense Exposure" value={formatNaira(metrics.totalExpenses)} tone="amber" />
+          <PositionTile label="Collected into department accounts" value={formatNaira(metrics.totalCash)} tone="green" />
+          <PositionTile label="Spend reported" value={formatNaira(metrics.totalExpenses)} tone="amber" />
           <PositionTile label="Approved Reports" value={metrics.approved.length.toString()} tone="blue" />
           <PositionTile label="Marketing Leads" value={leads.length.toString()} tone="slate" />
         </div>
       </Panel>
 
-      <Panel title="Chairman Approval Queue" subtitle="Review, approve, or return departmental daily submissions.">
-        <SubmissionsTable submissions={submissions.filter((submission) => submission.status !== "Draft")} onStatusChange={onStatusChange} onReturnRequest={onReturnRequest} onReportOpen={onReportOpen} showActions />
+      <Panel title="Chairman Approval Queue" subtitle="Follow every departmental report from manager submission through Executive Director approve or return.">
+        <SubmissionsTable submissions={submissions.filter((submission) => submission.status !== "Draft")} onStatusChange={onStatusChange} onReturnRequest={onReturnRequest} onReportOpen={onReportOpen} />
       </Panel>
 
-      <Panel title="Approval Audit Trail" subtitle="Traceable Chairman approvals and returned-report decisions.">
+      <Panel title="Approval Audit Trail" subtitle="Traceable Executive Director approvals and returned-report decisions.">
         <ApprovalActionsTable actions={approvalActions} />
       </Panel>
 
@@ -1809,7 +2208,7 @@ function ChairmanApprovalPage({
     <div className="space-y-6">
       <PageTitle
         title="Chairman Approval Queue"
-        subtitle="Full-screen review workspace for approving or returning departmental daily submissions."
+        subtitle="Full-screen workspace to follow departmental reports. Executive Directors approve or return first."
         action={
           <div className="flex flex-wrap gap-3">
             <select
@@ -1835,8 +2234,8 @@ function ChairmanApprovalPage({
           </div>
         }
       />
-      <Panel title="Approval Register" subtitle="Chairman and General Manager decision actions for departmental reports.">
-        <SubmissionsTable submissions={filtered} onStatusChange={onStatusChange} onReturnRequest={onReturnRequest} onReportOpen={onReportOpen} showActions />
+      <Panel title="Approval Register" subtitle="Every submitted report and its Executive Director decision. Chairman sees the flow here.">
+        <SubmissionsTable submissions={filtered} onStatusChange={onStatusChange} onReturnRequest={onReturnRequest} onReportOpen={onReportOpen} />
       </Panel>
       <Panel title="Approval Audit Trail" subtitle="Decision history for the selected department scope.">
         <ApprovalActionsTable actions={filteredActions} />
@@ -1850,6 +2249,9 @@ function DepartmentReportsPage({
   approvalActions,
   departmentRows,
   onReportOpen,
+  onStatusChange,
+  onReturnRequest,
+  showActions,
   title = "Department Reports",
   subtitle = "Submitted daily reports by subsidiary, then by the department inside it."
 }: {
@@ -1857,6 +2259,9 @@ function DepartmentReportsPage({
   approvalActions: ApprovalAction[];
   departmentRows: DepartmentRow[];
   onReportOpen: (id: string) => void;
+  onStatusChange?: (id: string, status: Exclude<SubmissionStatus, "Draft">) => void;
+  onReturnRequest?: (id: string) => void;
+  showActions?: boolean;
   title?: string;
   subtitle?: string;
 }) {
@@ -1904,7 +2309,13 @@ function DepartmentReportsPage({
         ))}
       </div>
       <Panel title="All Department Report Rows" subtitle="Detailed report register for executive review and audit trail.">
-        <SubmissionsTable submissions={submissions} onReportOpen={onReportOpen} />
+        <SubmissionsTable
+          submissions={submissions}
+          onReportOpen={onReportOpen}
+          onStatusChange={onStatusChange}
+          onReturnRequest={onReturnRequest}
+          showActions={showActions}
+        />
       </Panel>
       <Panel title="Narrative Report Detail" subtitle="Operational notes submitted by department heads.">
         <div className="grid gap-4 xl:grid-cols-2">
@@ -1942,12 +2353,14 @@ function AssetsPage({
   assets: assetList,
   departments: departmentOptions,
   onCreate,
-  readOnly = false
+  readOnly = false,
+  lockDepartment
 }: {
   assets: AssetRecord[];
   departments: DepartmentRow[];
   onCreate: (asset: AssetRecord) => Promise<void>;
   readOnly?: boolean;
+  lockDepartment?: DepartmentRow;
 }) {
   const [form, setForm] = useState({
     asset_id: "",
@@ -1956,8 +2369,8 @@ function AssetsPage({
     purchase_date: "",
     supplier_name: "",
     serial_number: "",
-    subsidiary_id: "",
-    department_id: "",
+    subsidiary_id: lockDepartment?.subsidiaryId ?? "",
+    department_id: lockDepartment?.id ?? "",
     custodian_name: "",
     warranty_expiration: "",
     maintenance_schedule_interval: "Every 30 days",
@@ -1967,6 +2380,15 @@ function AssetsPage({
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!lockDepartment) return;
+    setForm((current) => ({
+      ...current,
+      subsidiary_id: lockDepartment.subsidiaryId ?? "",
+      department_id: lockDepartment.id
+    }));
+  }, [lockDepartment?.id, lockDepartment?.subsidiaryId]);
 
   const maintenanceRequired = assetList.filter((asset) => asset.status === "Maintenance Required").length;
   const criticalFaults = assetList.filter((asset) => asset.status === "Critical Fault").length;
@@ -1990,7 +2412,7 @@ function AssetsPage({
         purchase_date: form.purchase_date,
         supplier_name: form.supplier_name.trim(),
         serial_number: form.serial_number.trim(),
-        department_id: form.department_id,
+        department_id: lockDepartment?.id || form.department_id,
         custodian_name: form.custodian_name.trim(),
         warranty_expiration: form.warranty_expiration || "N/A",
         maintenance_schedule_interval: form.maintenance_schedule_interval.trim(),
@@ -2005,8 +2427,8 @@ function AssetsPage({
         purchase_date: "",
         supplier_name: "",
         serial_number: "",
-        subsidiary_id: "",
-        department_id: "",
+        subsidiary_id: lockDepartment?.subsidiaryId ?? "",
+        department_id: lockDepartment?.id ?? "",
         custodian_name: "",
         warranty_expiration: "",
         maintenance_schedule_interval: "Every 30 days",
@@ -2026,9 +2448,11 @@ function AssetsPage({
       <PageTitle
         title="Assets"
         subtitle={
-          readOnly
-            ? "Fixed assets in your subsidiary — supplier, custodian, warranty, and maintenance status."
-            : "Chairman's fixed-asset register with supplier, serial number, custodian, warranty, and maintenance accountability fields."
+          lockDepartment
+            ? `Register kit for ${placeLabel(lockDepartment.name, lockDepartment.subsidiaryName)}. Your Executive Director and the Chairman can see this register.`
+            : readOnly
+              ? "Fixed assets in view — supplier, custodian, warranty, and maintenance status. Managers enter assets for their own departments."
+              : "Fixed-asset register with supplier, serial number, custodian, warranty, and maintenance accountability fields."
         }
       />
       <MetricGrid>
@@ -2039,7 +2463,12 @@ function AssetsPage({
       </MetricGrid>
 
       {!readOnly && (
-      <Panel title="Register New Asset" subtitle="Add assets for Chairman, General Manager, and department visibility.">
+      <Panel title="Register New Asset" subtitle="Add assets for this department. They stay on your register.">
+        {!lockDepartment?.id && (
+          <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Your login is not linked to a department yet, so the asset cannot be saved against a desk.
+          </p>
+        )}
         <form onSubmit={handleCreate} className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <FormInput label="Asset ID" value={form.asset_id} onChange={(value) => setForm({ ...form, asset_id: value })} />
           <FormInput label="Asset Name" value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
@@ -2047,13 +2476,20 @@ function AssetsPage({
           <FormInput label="Purchase Date" value={form.purchase_date} onChange={(value) => setForm({ ...form, purchase_date: value })} />
           <FormInput label="Supplier" value={form.supplier_name} onChange={(value) => setForm({ ...form, supplier_name: value })} />
           <FormInput label="Serial Number" value={form.serial_number} onChange={(value) => setForm({ ...form, serial_number: value })} />
-          <SubsidiaryDepartmentFields
-            departments={departmentOptions}
-            subsidiaryId={form.subsidiary_id}
-            departmentId={form.department_id}
-            onSubsidiaryId={(id) => setForm({ ...form, subsidiary_id: id, department_id: "" })}
-            onDepartmentId={(id) => setForm({ ...form, department_id: id })}
-          />
+          {lockDepartment ? (
+            <label className="block md:col-span-2">
+              <span className="field-label">Department</span>
+              <p className="form-control bg-slate-50">{placeLabel(lockDepartment.name, lockDepartment.subsidiaryName)}</p>
+            </label>
+          ) : (
+            <SubsidiaryDepartmentFields
+              departments={departmentOptions}
+              subsidiaryId={form.subsidiary_id}
+              departmentId={form.department_id}
+              onSubsidiaryId={(id) => setForm({ ...form, subsidiary_id: id, department_id: "" })}
+              onDepartmentId={(id) => setForm({ ...form, department_id: id })}
+            />
+          )}
           <FormInput label="Custodian" value={form.custodian_name} onChange={(value) => setForm({ ...form, custodian_name: value })} />
           <FormInput label="Warranty Expiration" value={form.warranty_expiration} onChange={(value) => setForm({ ...form, warranty_expiration: value })} />
           <FormInput label="Maintenance Interval" value={form.maintenance_schedule_interval} onChange={(value) => setForm({ ...form, maintenance_schedule_interval: value })} />
@@ -2075,7 +2511,7 @@ function AssetsPage({
           </label>
           {error && <div className="md:col-span-2 xl:col-span-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           <div className="md:col-span-2 xl:col-span-3">
-            <button type="submit" disabled={saving || !form.asset_id.trim() || !form.name.trim() || !form.custodian_name.trim() || !form.department_id} className="primary-button disabled:opacity-60">
+            <button type="submit" disabled={saving || !form.asset_id.trim() || !form.name.trim() || !form.custodian_name.trim() || !(lockDepartment?.id || form.department_id)} className="primary-button disabled:opacity-60">
               {saving ? "Saving asset..." : "Save Asset"}
             </button>
           </div>
@@ -2083,7 +2519,7 @@ function AssetsPage({
       </Panel>
       )}
 
-      <Panel title="Asset Register" subtitle={readOnly ? "Assets assigned to departments in your subsidiary." : "Live assets stored in Supabase."}>
+      <Panel title="Asset Register" subtitle={lockDepartment ? "Live assets for this department." : readOnly ? "Assets assigned to departments in view." : "Live assets stored in Supabase."}>
         {assetList.length ? (
           <SimpleTable
             headers={[
@@ -2103,7 +2539,7 @@ function AssetsPage({
             rows={assetTableRows(assetList)}
           />
         ) : (
-          <EmptyState title="No assets registered" text="Use the form above to add the first corporate asset." />
+          <EmptyState title="No assets registered" text={readOnly ? "Managers enter assets for their own departments." : "Use the form above to add the first asset for this department."} />
         )}
       </Panel>
       <Panel title="Warranty and Maintenance Watchlist" subtitle="Items for audit, maintenance planning, and accountability follow-up.">
@@ -2113,6 +2549,7 @@ function AssetsPage({
           <PositionTile label="Maintenance Schedules" value={`${assetList.length}/${assetList.length}`} tone="green" />
         </div>
       </Panel>
+      <AssetHistory canWrite={!readOnly} />
     </div>
   );
 }
@@ -2504,8 +2941,8 @@ function GeneralManagerDashboard({
           title="Department Compliance"
           subtitle={
             isEd
-              ? `Submission discipline across ${scopeLabel} — returned reports and pending Chairman approvals.`
-              : "General Manager monitoring page for department submission discipline, returned reports, and pending Chairman approvals."
+              ? `Submission discipline across ${scopeLabel} — returned reports and reports waiting on you.`
+              : "General Manager monitoring page for department submission discipline, returned reports, and reports waiting on Executive Directors."
           }
         />
         <Panel title="Compliance Matrix" subtitle="Submission status by arm.">
@@ -2525,8 +2962,8 @@ function GeneralManagerDashboard({
           title="Exceptions"
           subtitle={
             isEd
-              ? `Critical and attention items inside ${scopeLabel} that need your awareness before Chairman decision.`
-              : "Critical and attention-level matters requiring General Manager follow-up before Chairman decision."
+              ? `Critical and attention items inside ${scopeLabel} that need your awareness while reports sit with you.`
+              : "Critical and attention-level matters requiring General Manager follow-up while Executive Directors review reports."
           }
         />
         <MetricGrid>
@@ -2591,10 +3028,50 @@ function GeneralManagerDashboard({
       />
       <MetricGrid>
         <MetricCard label="Active Operations" value={submissions.reduce((sum, item) => sum + item.activeOperations, 0).toString()} tone="blue" />
-        <MetricCard label="Reports Awaiting Chairman" value={metrics.pending.length.toString()} tone="amber" />
+        <MetricCard label="Reports Awaiting Executive Director" value={metrics.pending.length.toString()} tone="amber" />
         <MetricCard label="Critical Exceptions" value={critical.length.toString()} tone="red" />
         <MetricCard label="Marketing Assigned Leads" value={leads.filter((lead) => lead.status === "Assigned").length.toString()} tone="green" />
       </MetricGrid>
+      {isEd && (
+        <Panel
+          title="Department accounts"
+          subtitle="Each desk in this subsidiary banks with you. Figures come from submitted daily reports, not the Banking and Finance cash book."
+        >
+          <div className="overflow-x-auto rounded-2xl border border-slate-200">
+            <table className="min-w-full text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-[0.12em] text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Department</th>
+                  <th className="px-4 py-3">Billed</th>
+                  <th className="px-4 py-3">Collected</th>
+                  <th className="px-4 py-3">Spend</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {departmentRows.map((department) => {
+                  const rows = submissions.filter(
+                    (item) => item.status !== "Draft" && (item.departmentId === department.id || item.department === department.name)
+                  );
+                  const billed = rows.reduce((sum, item) => sum + item.revenue, 0);
+                  const collected = rows.reduce((sum, item) => sum + item.cashIn, 0);
+                  const spent = rows.reduce((sum, item) => sum + item.expenses, 0);
+                  return (
+                    <tr key={department.id}>
+                      <td className="px-4 py-3 font-semibold text-slate-950">{department.name}</td>
+                      <td className="px-4 py-3">{formatNaira(billed)}</td>
+                      <td className="px-4 py-3">{formatNaira(collected)}</td>
+                      <td className="px-4 py-3">{formatNaira(spent)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {!departmentRows.length && (
+            <p className="text-sm text-slate-500">No departments are linked to this subsidiary yet.</p>
+          )}
+        </Panel>
+      )}
       <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
         <Panel title="Department Compliance Register" subtitle="Track which arms have submitted, which were returned, and which need follow-up.">
           <SubmissionsTable
@@ -2602,12 +3079,12 @@ function GeneralManagerDashboard({
             onReportOpen={onReportOpen}
             onStatusChange={onStatusChange}
             onReturnRequest={onReturnRequest}
-            showActions
+            showActions={isEd}
           />
         </Panel>
         <Panel
           title="Exception Register"
-          subtitle={isEd ? "Items that need subsidiary awareness before Chairman review." : "Items for General Manager intervention before Chairman review."}
+          subtitle={isEd ? "Items that need your decision before they close." : "Items for General Manager awareness while Executive Directors review reports."}
         >
           <div className="space-y-3">
             {critical.map((item) => (
@@ -2657,6 +3134,7 @@ function DepartmentHeadPortal({
   onPageChange: (page: PageId) => void;
 }) {
   const department = session.department ?? "Corporate Administration";
+  const finance = reportFinance({ name: department, code: session.departmentCode });
   const blueprint = departmentBlueprints[department] ?? {
     completedLabel: "Jobs Completed Today",
     progressLabel: "Jobs in Progress",
@@ -2684,6 +3162,7 @@ function DepartmentHeadPortal({
       upcomingProjects: "",
       growthIdeas: "",
       challenges: "",
+      fundsDestination: "department_account",
       summary: ""
     };
   }
@@ -2725,6 +3204,7 @@ function DepartmentHeadPortal({
       upcomingProjects: report.upcomingProjects || "",
       growthIdeas: report.growthIdeas || "",
       challenges: report.challenges || "",
+      fundsDestination: report.fundsDestination || "department_account",
       summary: report.summary && report.summary !== "No narrative summary supplied." ? report.summary : ""
     });
     setResumeParentId(mode === "returned" ? report.dbId || null : null);
@@ -2755,6 +3235,12 @@ function DepartmentHeadPortal({
         return;
       }
     }
+    const collected = finance.showCollected ? Number(form.cashIn) || 0 : 0;
+    if (status === "Pending Chairman Review" && finance.showDestination && collected > 0 && !form.fundsDestination) {
+      setStep(3);
+      setFormError("Say whether collections went into this department's account or are still at the desk.");
+      return;
+    }
     if (!session.departmentId) {
       setFormError(
         "Your profile has no department assigned. Ask the Chairman or General Manager to fix your user account."
@@ -2767,11 +3253,11 @@ function DepartmentHeadPortal({
       department,
       submittedBy: session.name,
       date: new Date().toISOString().slice(0, 10),
-      revenue: Number(form.revenue) || 0,
+      revenue: finance.showBilled ? Number(form.revenue) || 0 : 0,
       inquiries: Number(form.inquiries) || 0,
       attendance: Number(form.attendance) || 0,
       activeOperations: Number(form.activeOperations) || 0,
-      cashIn: Number(form.cashIn) || 0,
+      cashIn: collected,
       expenses: Number(form.expenses) || 0,
       assetsFlagged: Number(form.assetsFlagged) || 0,
       jobsCompleted: form.jobsCompleted,
@@ -2782,6 +3268,7 @@ function DepartmentHeadPortal({
       upcomingProjects: form.upcomingProjects,
       growthIdeas: form.growthIdeas,
       challenges: form.challenges,
+      fundsDestination: finance.showDestination && collected > 0 ? form.fundsDestination : undefined,
       summary: form.summary || "No narrative summary supplied.",
       status,
       priority:
@@ -2810,7 +3297,7 @@ function DepartmentHeadPortal({
       <div className="space-y-6">
         <PageTitle
           title={`${department} Reports`}
-          subtitle="Submission history and Chairman review status for this department."
+          subtitle="Submission history and Executive Director review status for this department."
         />
         {draftReports.length > 0 && (
           <Panel title="Continue a draft" subtitle="Pick up where you left off without retyping.">
@@ -2822,7 +3309,7 @@ function DepartmentHeadPortal({
                 >
                   <div>
                     <p className="font-semibold text-slate-950">{report.date}</p>
-                    <p className="mt-1 text-sm text-slate-600">Draft · {formatNaira(report.revenue)} revenue</p>
+                    <p className="mt-1 text-sm text-slate-600">Draft · {formatNaira(report.revenue)} billed</p>
                   </div>
                   <button type="button" onClick={() => loadReportIntoForm(report, "draft")} className="primary-button">
                     Continue draft
@@ -2842,7 +3329,7 @@ function DepartmentHeadPortal({
   if (activePage === "Returned Items") {
     return (
       <div className="space-y-6">
-        <PageTitle title="Returned Items" subtitle="Fix returned reports here, then resubmit to the Chairman." />
+        <PageTitle title="Returned Items" subtitle="Fix returned reports here, then resubmit to the Executive Director." />
         <Panel
           title="Returned Department Reports"
           subtitle="Tap Fix & resubmit to load the report into Daily Submission."
@@ -2908,7 +3395,7 @@ function DepartmentHeadPortal({
           </p>
         ) : todayPending ? (
           <p className="text-sm font-medium text-blue-800">
-            Today’s report is <span className="font-semibold">Pending Chairman Review</span>.
+            Today’s report is <span className="font-semibold">{reportStatusLabel("Pending Chairman Review")}</span>.
             <button type="button" className="ml-2 font-semibold underline" onClick={() => onReportOpen(todayPending.id)}>
               Open it
             </button>
@@ -2992,7 +3479,7 @@ function DepartmentHeadPortal({
         }
         subtitle={
           step === 1
-            ? "Required. Write what the Chairman needs to know today."
+            ? "Required. Write what your Executive Director needs to know today."
             : step === 2
               ? "What your team completed and what is still running."
               : "Quick figures. You can leave zeros if not applicable."
@@ -3047,7 +3534,7 @@ function DepartmentHeadPortal({
                   value={form.summary}
                   onChange={(event) => setForm({ ...form, summary: event.target.value })}
                   className="form-control min-h-24 resize-none"
-                  placeholder="One short paragraph if you want to highlight a priority for the Chairman."
+                  placeholder="One short paragraph if you want to highlight a priority for the Executive Director."
                 />
               </label>
             )}
@@ -3090,22 +3577,42 @@ function DepartmentHeadPortal({
         )}
 
         {step === 3 && (
-          <div className="grid grid-cols-2 gap-3 sm:gap-4">
-            <FormInput label="Revenue Reported" value={form.revenue} onChange={(value) => setForm({ ...form, revenue: value })} />
-            <FormInput label="Inquiries" value={form.inquiries} onChange={(value) => setForm({ ...form, inquiries: value })} />
-            <FormInput label="Attendance" value={form.attendance} onChange={(value) => setForm({ ...form, attendance: value })} />
-            <FormInput
-              label="Active Operations"
-              value={form.activeOperations}
-              onChange={(value) => setForm({ ...form, activeOperations: value })}
-            />
-            <FormInput label="Cash-In" value={form.cashIn} onChange={(value) => setForm({ ...form, cashIn: value })} />
-            <FormInput label="Expenses" value={form.expenses} onChange={(value) => setForm({ ...form, expenses: value })} />
-            <FormInput
-              label="Assets Flagged"
-              value={form.assetsFlagged}
-              onChange={(value) => setForm({ ...form, assetsFlagged: value })}
-            />
+          <div className="space-y-4">
+            <p className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">{finance.note}</p>
+            <div className="grid grid-cols-2 gap-3 sm:gap-4">
+              {finance.showBilled && (
+                <FormInput label={finance.billedLabel} value={form.revenue} onChange={(value) => setForm({ ...form, revenue: value })} />
+              )}
+              {finance.showCollected && (
+                <FormInput label={finance.collectedLabel} value={form.cashIn} onChange={(value) => setForm({ ...form, cashIn: value })} />
+              )}
+              <FormInput label={finance.spentLabel} value={form.expenses} onChange={(value) => setForm({ ...form, expenses: value })} />
+              <FormInput label="Inquiries" value={form.inquiries} onChange={(value) => setForm({ ...form, inquiries: value })} />
+              <FormInput label="Attendance" value={form.attendance} onChange={(value) => setForm({ ...form, attendance: value })} />
+              <FormInput
+                label="Active Operations"
+                value={form.activeOperations}
+                onChange={(value) => setForm({ ...form, activeOperations: value })}
+              />
+              <FormInput
+                label="Assets Flagged"
+                value={form.assetsFlagged}
+                onChange={(value) => setForm({ ...form, assetsFlagged: value })}
+              />
+            </div>
+            {finance.showDestination && (
+              <label className="block">
+                <span className="field-label">Where collections sit</span>
+                <select
+                  className="form-control"
+                  value={form.fundsDestination}
+                  onChange={(event) => setForm({ ...form, fundsDestination: event.target.value })}
+                >
+                  <option value="department_account">Paid into this department's account (Executive Director)</option>
+                  <option value="held_at_desk">Still at the desk</option>
+                </select>
+              </label>
+            )}
           </div>
         )}
 
@@ -3137,7 +3644,7 @@ function DepartmentHeadPortal({
                 onClick={() => submitReport("Pending Chairman Review")}
                 className="primary-button w-full disabled:opacity-60"
               >
-                {saving ? "Submitting..." : "Submit"}
+                {saving ? "Submitting..." : "Submit to Executive Director"}
               </button>
             )}
           </div>
@@ -3360,7 +3867,7 @@ function SubmissionsTable({
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                   <div>
-                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">Revenue</p>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">Billed</p>
                     <p className="mt-1 font-semibold text-slate-900">{formatNaira(item.revenue)}</p>
                   </div>
                   <div>
@@ -3385,13 +3892,13 @@ function SubmissionsTable({
               {[
                 "Department",
                 "Submitted By",
-                "Revenue",
+                "Billed",
                 "Operations",
                 "Alerts",
                 "Status",
                 "Priority",
                 onReportOpen ? "Open" : "",
-                showActions ? "Chairman Action" : ""
+                showActions ? "Executive Director Action" : ""
               ].filter(Boolean).map((header) => (
                 <th key={header} className="border-b border-slate-200 px-4 py-3 font-bold">{header}</th>
               ))}
@@ -3575,7 +4082,7 @@ function SimpleTable({ headers, rows }: { headers: string[]; rows: Array<Array<R
 
 function ApprovalActionsTable({ actions }: { actions: ApprovalAction[] }) {
   if (!actions.length) {
-    return <EmptyState title="No approval actions yet" text="Chairman approval and returned-report actions will appear here." />;
+    return <EmptyState title="No approval actions yet" text="Executive Director approval and returned-report actions will appear here." />;
   }
 
   return (
@@ -3757,31 +4264,30 @@ function ExecutiveSummaryDocument({ data, documentRef }: { data: ExecutiveSummar
 
       <div className="px-8 py-6">
         <p className="text-sm leading-6 text-slate-600">
-          Consolidated departmental revenue, operational reports, and Department Development Briefs for executive review and approval
-          oversight.
+          Consolidated billed, collected, and spend pulse across departments, plus Department Development Briefs for executive review. Each department banks with its Executive Director.
         </p>
 
         <div className="exec-avoid-break mt-5 grid grid-cols-2 gap-3 md:grid-cols-3">
           <SummaryStat label="Departments Reporting" value={`${data.departmentsReporting}/${data.departmentsTotal}`} />
           <SummaryStat label="Pending Approvals" value={String(data.pendingApprovals)} />
           <SummaryStat label="Asset Alerts" value={String(data.alerts)} />
-          <SummaryStat label="Consolidated Revenue" value={formatNaira(data.totalRevenue)} />
-          <SummaryStat label="Cash-In Reported" value={formatNaira(data.totalCash)} />
-          <SummaryStat label="Expense Exposure" value={formatNaira(data.totalExpenses)} />
+          <SummaryStat label="Billed across departments" value={formatNaira(data.totalRevenue)} />
+          <SummaryStat label="Collected into department accounts" value={formatNaira(data.totalCash)} />
+          <SummaryStat label="Spend reported" value={formatNaira(data.totalExpenses)} />
         </div>
 
         <section className="exec-avoid-break mt-8">
           <h2 className="border-b border-slate-200 pb-2 text-sm font-bold uppercase tracking-[0.16em] text-blue-900">
-            1. Revenue by Department
+            1. Pulse by Department
           </h2>
           <table className="mt-4 w-full border-collapse text-left text-[12px]">
             <thead>
               <tr className="bg-blue-900 text-white">
                 <th className="px-3 py-2.5 font-semibold">Department</th>
                 <th className="px-3 py-2.5 font-semibold">Reports</th>
-                <th className="px-3 py-2.5 font-semibold">Revenue</th>
-                <th className="px-3 py-2.5 font-semibold">Cash-In</th>
-                <th className="px-3 py-2.5 font-semibold">Expenses</th>
+                <th className="px-3 py-2.5 font-semibold">Billed</th>
+                <th className="px-3 py-2.5 font-semibold">Collected</th>
+                <th className="px-3 py-2.5 font-semibold">Spend</th>
                 <th className="px-3 py-2.5 font-semibold">Ops</th>
                 <th className="px-3 py-2.5 font-semibold">Alerts</th>
               </tr>
@@ -3823,7 +4329,7 @@ function ExecutiveSummaryDocument({ data, documentRef }: { data: ExecutiveSummar
                           </p>
                         </div>
                         <div className="text-right text-xs text-slate-600">
-                          <p>Revenue: <span className="font-semibold text-slate-900">{formatNaira(report.revenue)}</span></p>
+                          <p>Billed: <span className="font-semibold text-slate-900">{formatNaira(report.revenue)}</span></p>
                           <p className="mt-1">Operations: {report.activeOperations} Â· Alerts: {report.assetsFlagged}</p>
                         </div>
                       </div>
@@ -3945,15 +4451,15 @@ function ExecutiveSummaryPreviewModal({
         `Date: ${data.dateLabel}`,
         `Departments reporting: ${data.departmentsReporting}/${data.departmentsTotal}`,
         `Pending approvals: ${data.pendingApprovals}`,
-        `Revenue: ${formatNaira(data.totalRevenue)}`,
-        `Cash-in: ${formatNaira(data.totalCash)}`,
-        `Expenses: ${formatNaira(data.totalExpenses)}`,
+        `Billed: ${formatNaira(data.totalRevenue)}`,
+        `Collected: ${formatNaira(data.totalCash)}`,
+        `Spend: ${formatNaira(data.totalExpenses)}`,
         `Alerts: ${data.alerts}`,
         "",
-        "REVENUE BY DEPARTMENT",
+        "PULSE BY DEPARTMENT",
         ...data.revenueByDepartment.map(
           (row) =>
-            `${row.department}: reports ${row.reportCount}; revenue ${formatNaira(row.revenue)}; cash-in ${formatNaira(row.cashIn)}; expenses ${formatNaira(row.expenses)}`
+            `${row.department}: reports ${row.reportCount}; billed ${formatNaira(row.revenue)}; collected ${formatNaira(row.cashIn)}; spend ${formatNaira(row.expenses)}`
         ),
         "",
         "DEPARTMENT DEVELOPMENT BRIEFS",
@@ -4099,7 +4605,7 @@ function NotificationPopup({
               Notifications
             </h3>
             <p className="mt-1 text-sm text-slate-500">
-              Approval and correction messages from the Chairman and General Manager.
+              Approval and correction messages from your Executive Director.
             </p>
           </div>
           <button onClick={onClose} className="secondary-button shrink-0 px-3 py-2 text-xs sm:text-sm">
@@ -4133,7 +4639,7 @@ function NotificationPopup({
           ) : (
             <EmptyState
               title="No notifications yet"
-              text="Approval and return messages for your department will appear here after the Chairman acts on a report."
+              text="Approval and return messages for your department will appear here after the Executive Director acts on a report."
             />
           )}
         </div>
@@ -4230,8 +4736,8 @@ function StatusPill({ status }: { status: SubmissionStatus }) {
         status === "Returned" && "bg-red-50 text-red-700 ring-red-200"
       )}
     >
-      {status}
-    </span>
+        {reportStatusLabel(status)}
+      </span>
   );
 }
 

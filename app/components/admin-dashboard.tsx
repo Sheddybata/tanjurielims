@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
+import { ListLoader } from "@/app/components/list-loader";
 
 type StaffPerson = {
   id: string;
@@ -98,6 +99,7 @@ export function AdminDashboard({
   const [letters, setLetters] = useState<LetterRow[]>([]);
   const [kpis, setKpis] = useState<KpiBrief[]>([]);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const today = new Date();
   const weekStart = isoDate(mondayOf(today));
   const todayIso = isoDate(today);
@@ -130,6 +132,8 @@ export function AdminDashboard({
         if (kpiResponse.ok) setKpis(kpiPayload.kpis ?? []);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load the briefing");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
@@ -171,7 +175,10 @@ export function AdminDashboard({
         </p>
       </div>
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-
+      {loading ? (
+        <ListLoader label="Loading briefing…" variant="table" />
+      ) : (
+      <>
       <Section title="People" subtitle="Headcount and movement since Monday.">
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <Count label="Total staff" value={String(active.length)} onClick={() => onOpen("Staff Register")} />
@@ -257,7 +264,7 @@ export function AdminDashboard({
         <NameList
           title="Pending reports"
           rows={pendingReports.map((report) => `${report.subsidiary ? `${report.subsidiary} · ` : ""}${report.department} · ${report.date} · ${report.submittedBy}`)}
-          empty="Nothing is waiting on the Chairman."
+          empty="Nothing is waiting on an Executive Director."
         />
         <NameList
           title="Returned reports"
@@ -292,6 +299,8 @@ export function AdminDashboard({
           <Blank label="Leadership development" detail="No programme is recorded." />
         </div>
       </Section>
+      </>
+      )}
     </div>
   );
 }

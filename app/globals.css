@@ -102,6 +102,11 @@ textarea {
       padding-bottom: calc(7.5rem + env(safe-area-inset-bottom, 0px));
     }
 
+    .field-mobile-shell h2 {
+      font-size: 1.35rem;
+      line-height: 1.3;
+    }
+
     .field-mobile-shell .mobile-submit-bar {
       position: fixed;
       left: 0.75rem;

@@ -6,6 +6,7 @@ export type Caller = {
   userId: string;
   role: DbRole;
   departmentId: string | null;
+  subsidiaryId: string | null;
   supabase: SupabaseClient;
 };
 
@@ -28,7 +29,7 @@ export async function requireCaller(request: NextRequest): Promise<Caller | { er
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("role, department_id, is_active")
+    .select("role, department_id, subsidiary_id, is_active")
     .eq("id", userData.user.id)
     .maybeSingle();
 
@@ -38,6 +39,7 @@ export async function requireCaller(request: NextRequest): Promise<Caller | { er
     userId: userData.user.id,
     role: profile.role as DbRole,
     departmentId: profile.department_id ?? null,
+    subsidiaryId: profile.subsidiary_id ?? null,
     supabase
   };
 }

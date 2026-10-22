@@ -27,6 +27,55 @@ export const leaveRules: Record<
 const limitedStatuses = new Set(["nysc", "intern"]);
 const limitedAllowed = new Set<LeaveCode>(["emergency", "unpaid"]);
 
+function toIsoDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function addWorkingDays(startDate: string, count: number) {
+  const cursor = new Date(`${startDate}T00:00:00`);
+  if (Number.isNaN(cursor.getTime()) || count < 1) return startDate;
+  let seen = 0;
+  while (seen < count) {
+    const weekday = cursor.getDay();
+    if (weekday !== 0 && weekday !== 6) {
+      seen += 1;
+      if (seen === count) break;
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return toIsoDate(cursor);
+}
+
+export function leaveDateWindow(leaveType?: string | null, startDate?: string | null) {
+  const rule = leaveType && leaveType in leaveRules ? leaveRules[leaveType as LeaveCode] : null;
+  const hint = rule
+    ? rule.minDays != null && rule.maxDays != null
+      ? `${rule.label} leave is ${rule.minDays} to ${rule.maxDays} working days.`
+      : rule.maxDays != null
+        ? `${rule.label} leave cannot be more than ${rule.maxDays} working days.`
+        : rule.minDays != null
+          ? `${rule.label} leave must be at least ${rule.minDays} working days.`
+          : ""
+    : "";
+  if (!rule || !startDate) return { min: startDate || undefined, max: undefined, hint };
+  return {
+    min: rule.minDays != null ? addWorkingDays(startDate, rule.minDays) : startDate,
+    max: rule.maxDays != null ? addWorkingDays(startDate, rule.maxDays) : undefined,
+    hint
+  };
+}
+
+export function clampLeaveEndDate(leaveType: string | undefined, startDate: string | undefined, endDate: string | undefined) {
+  if (!endDate || !startDate) return endDate ?? "";
+  const { min, max } = leaveDateWindow(leaveType, startDate);
+  if (min && endDate < min) return min;
+  if (max && endDate > max) return max;
+  return endDate;
+}
+
 export function workingDays(startDate: string, endDate: string) {
   const start = new Date(`${startDate}T00:00:00`);
   const end = new Date(`${endDate}T00:00:00`);
