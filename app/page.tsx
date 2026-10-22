@@ -239,7 +239,7 @@ function reportStatusLabel(status: SubmissionStatus) {
   return status;
 }
 
-function placeLabel(department?: string, subsidiary?: string) {
+function placeLabel(department?: string | null, subsidiary?: string | null) {
   if (subsidiary && department) return `${subsidiary} · ${department}`;
   return department || "";
 }
