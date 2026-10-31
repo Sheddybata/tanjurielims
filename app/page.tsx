@@ -29,8 +29,11 @@ import { DirectoryOffice } from "@/app/components/directory-office";
 import { AnnouncementsOffice } from "@/app/components/announcements-office";
 import { CashOffice } from "@/app/components/cash-office";
 import { SuiteOffice } from "@/app/components/suite-office";
+import { LoanOffice } from "@/app/components/loan-office";
+import { ConstructionOffice } from "@/app/components/construction-office";
 import { AssetHistory } from "@/app/components/asset-history";
-import { isBankingFinance, isSuiteDepartment } from "@/lib/ims/service";
+import { isBankingFinance, isConstructionDepartment, isLoanDesk, isSuiteDepartment } from "@/lib/ims/service";
+import { CONSTRUCTION_DESKS, constructionDeskLabel, deskFromJobTitle } from "@/lib/ims/construction-desks";
 import { fundsDestinationLabel, reportFinance } from "@/lib/ims/report-finance";
 
 type Role =
@@ -53,6 +56,8 @@ type PageId =
   | "Announcements"
   | "Cash Book"
   | "Check-ins"
+  | "Loans"
+  | "Jalingo Road Construction"
   | "Executive Dashboard"
   | "Approval Queue"
   | "Department Reports"
@@ -256,7 +261,7 @@ const departments: Department[] = [
 ];
 
 
-const serviceLanePages: PageId[] = ["Home", "Requests", "Directory", "Announcements", "Cash Book", "Check-ins"];
+const serviceLanePages: PageId[] = ["Home", "Requests", "Directory", "Announcements", "Cash Book", "Check-ins", "Loans", "Jalingo Road Construction"];
 
 function isServiceLanePage(page: PageId) {
   return serviceLanePages.includes(page);
@@ -273,6 +278,8 @@ const rolePages: Record<Role, PageId[]> = {
     "Announcements",
     "Cash Book",
     "Check-ins",
+    "Loans",
+    "Jalingo Road Construction",
     "Staff Register",
     "Staff Applications",
     "Leave",
@@ -294,6 +301,8 @@ const rolePages: Record<Role, PageId[]> = {
     "Announcements",
     "Cash Book",
     "Check-ins",
+    "Loans",
+    "Jalingo Road Construction",
     "Staff Register",
     "Leave",
     "Directorate KPIs"
@@ -309,6 +318,8 @@ const rolePages: Record<Role, PageId[]> = {
     "Announcements",
     "Cash Book",
     "Check-ins",
+    "Loans",
+    "Jalingo Road Construction",
     "Staff Register",
     "Staff Applications",
     "Assets",
@@ -323,6 +334,8 @@ const rolePages: Record<Role, PageId[]> = {
     "Announcements",
     "Cash Book",
     "Check-ins",
+    "Loans",
+    "Jalingo Road Construction",
     "Staff Register",
     "Staff Applications",
     "Leave",
@@ -340,6 +353,8 @@ const rolePages: Record<Role, PageId[]> = {
     "Announcements",
     "Cash Book",
     "Check-ins",
+    "Loans",
+    "Jalingo Road Construction",
     "Assets",
     "Directorate KPIs"
   ],
@@ -353,6 +368,8 @@ const rolePages: Record<Role, PageId[]> = {
     "Announcements",
     "Cash Book",
     "Check-ins",
+    "Loans",
+    "Jalingo Road Construction",
     "Assets",
     "Directorate KPIs"
   ],
@@ -368,6 +385,8 @@ const mobileNavLabels: Partial<Record<PageId, string>> = {
   Announcements: "News",
   "Cash Book": "Cash",
   "Check-ins": "Suites",
+  Loans: "Loans",
+  "Jalingo Road Construction": "Jalingo",
   "Daily Submission": "Submit",
   "My Reports": "Reports",
   Assets: "Assets",
@@ -383,6 +402,9 @@ function compactNavItems(session: Session, department?: DepartmentRow | null): P
   if (session.role === "department-head" || session.role === "manager") {
     const desk = stewardshipDepartment(session, department);
     if (isSuiteDepartment(desk)) return ["Home", "Requests", "Check-ins", "Directory", "My Reports"];
+    if (isConstructionDepartment(desk)) return ["Home", "Requests", "Jalingo Road Construction", "Directory", "My Reports"];
+    if (isLoanDesk(desk) && isBankingFinance(desk)) return ["Home", "Requests", "Loans", "Cash Book", "My Reports"];
+    if (isLoanDesk(desk)) return ["Home", "Requests", "Loans", "Directory", "My Reports"];
     if (isBankingFinance(desk)) return ["Home", "Requests", "Cash Book", "Directory", "My Reports"];
     return ["Home", "Requests", "Daily Submission", "Directory", "My Reports"];
   }
@@ -406,10 +428,14 @@ function pagesForSession(session: Session, department?: DepartmentRow | null): P
   const field = session.role === "manager" || session.role === "department-head";
   const banking = isBankingFinance(desk);
   const suite = isSuiteDepartment(desk);
+  const loans = isLoanDesk(desk);
+  const construction = isConstructionDepartment(desk);
   const executiveOversight =
     session.role === "chairman" || session.role === "general-manager" || session.role === "director-of-administration";
   const edBanking = session.role === "executive-director" && (banking || desk.subsidiaryCode === "BIF");
   const edSuite = session.role === "executive-director" && (suite || desk.subsidiaryCode === "CON");
+  const edLoans = session.role === "executive-director" && (loans || desk.subsidiaryCode === "BIF");
+  const edSite = session.role === "executive-director" && (construction || desk.subsidiaryCode === "CON");
   return rolePages[session.role].filter((page) => {
     if (page === "Cash Book") {
       if (field) return banking;
@@ -421,6 +447,17 @@ function pagesForSession(session: Session, department?: DepartmentRow | null): P
       if (session.role === "executive-director") return edSuite;
       return executiveOversight;
     }
+    if (page === "Loans") {
+      if (field) return loans;
+      if (session.role === "executive-director") return edLoans;
+      return executiveOversight;
+    }
+    if (page === "Jalingo Road Construction") {
+      if (field) return construction;
+      if (session.role === "executive-director") return edSite;
+      return executiveOversight;
+    }
+    if (page === "Daily Submission" && field && construction) return false;
     return true;
   });
 }
@@ -645,6 +682,33 @@ const departmentBlueprints: Partial<
       "Liquidity Pool Reserve Balance"
     ],
     progressPlaceholder: "Processing 14 group thrift application portfolios; auditing loan repayment arrears schedules for Branch X."
+  },
+  Construction: {
+    completedLabel: "Work completed today",
+    progressLabel: "Work in progress",
+    equipmentLabel: "Plant and equipment",
+    equipmentInput: "checklist",
+    completedOptions: [
+      "Site clearing",
+      "Setting out",
+      "Earthworks / cut and fill",
+      "Laterite / sub-base laid",
+      "Culvert or drainage",
+      "Compaction",
+      "Grading",
+      "Base course",
+      "Asphalt / surfacing"
+    ],
+    equipmentOptions: [
+      "Grader",
+      "Bulldozer",
+      "Payloader",
+      "Tipper",
+      "Roller",
+      "Excavator",
+      "Water tanker"
+    ],
+    progressPlaceholder: "Jalingo road, Taraba: chainage, weather, plant on site, and what the crew finished today."
   }
 };
 
@@ -1104,6 +1168,8 @@ export default function Home() {
   const visiblePages = pagesForSession(session, sessionDepartment);
   const cashRelevant = visiblePages.includes("Cash Book");
   const suiteRelevant = visiblePages.includes("Check-ins");
+  const loanRelevant = visiblePages.includes("Loans");
+  const siteRelevant = visiblePages.includes("Jalingo Road Construction");
   const stewardshipDepartments =
     session.role === "manager" || session.role === "department-head"
       ? departmentRows.filter((item) => item.id === session.departmentId)
@@ -1150,8 +1216,12 @@ export default function Home() {
                 name={session.name}
                 roleLabel={roleLabels[session.role]}
                 canSubmitReports={writesDepartmentReports(session.role)}
+                fieldPhone={fieldMobile}
+                reportPage={siteRelevant ? "Jalingo Road Construction" : "Daily Submission"}
                 showCash={cashRelevant}
                 showCheckins={suiteRelevant}
+                showLoans={loanRelevant}
+                showSite={siteRelevant}
                 directoryScope={session.role === "executive-director" ? "subsidiary" : "department"}
                 showDepartmentAccounts={session.role === "executive-director"}
                 onOpen={(page) => goToPage(page)}
@@ -1174,6 +1244,70 @@ export default function Home() {
             )}
             {activePage === "Check-ins" && (
               <SuiteOffice departments={stewardshipDepartments} departmentId={session.departmentId} />
+            )}
+            {activePage === "Loans" && (
+              <LoanOffice
+                departments={stewardshipDepartments}
+                departmentId={session.departmentId}
+                canWrite={session.role === "manager" || session.role === "department-head" || session.role === "executive-director"}
+              />
+            )}
+            {activePage === "Jalingo Road Construction" && (
+              <ConstructionOffice
+                departments={stewardshipDepartments}
+                departmentId={session.departmentId}
+                canSubmit={writesDepartmentReports(session.role)}
+                reports={(session.role === "executive-director" ? scopedSubmissions : submissions)
+                  .filter((item) =>
+                    item.departmentId
+                      ? departmentRows.some((dept) => dept.id === item.departmentId && isConstructionDepartment(dept))
+                      : item.department === "Construction"
+                  )
+                  .map((item) => ({
+                    id: item.id,
+                    submittedBy: item.submittedBy,
+                    date: item.date,
+                    status: item.status,
+                    summary: item.summary,
+                    departmentUpdate: item.departmentUpdate,
+                    currentProjects: item.currentProjects,
+                    upcomingProjects: item.upcomingProjects,
+                    jobsCompleted: item.jobsCompleted,
+                    jobsInProgress: item.jobsInProgress,
+                    challenges: item.challenges,
+                    equipmentStatus: item.equipmentStatus,
+                    attendance: item.attendance,
+                    revenue: item.revenue,
+                    cashIn: item.cashIn,
+                    expenses: item.expenses
+                  }))}
+                canReview={session.role === "executive-director"}
+                onOpenReport={setSelectedReportId}
+                onApprove={async (id) => {
+                  try {
+                    await updateSubmissionStatus(id, "Approved");
+                  } catch (error) {
+                    window.alert(error instanceof Error ? error.message : "Failed to approve report");
+                  }
+                }}
+                onReturn={requestReportReturn}
+              >
+                {writesDepartmentReports(session.role) ? (
+                  <DepartmentHeadPortal
+                    activePage="Daily Submission"
+                    session={session}
+                    submissions={submissions}
+                    onSubmit={addSubmission}
+                    onReportOpen={setSelectedReportId}
+                    onPageChange={(page) => {
+                      if (page === "My Reports" || page === "Daily Submission") return;
+                      goToPage(page);
+                    }}
+                    title="Submit today’s Jalingo report"
+                    subtitle="File what you are responsible for. It goes to the Executive Director first."
+                  />
+                ) : null}
+              </ConstructionOffice>
             )}
             {session.role === "chairman" && activePage === "Executive Dashboard" && (
               <ChairmanDashboard
@@ -1787,20 +1921,29 @@ function Topbar({
             </button>
           )}
           <div className="min-w-0">
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
-              {roleLabels[session.role]}
-              {session.department ? ` · ${session.department}` : ""}
+            <p
+              className={
+                compact
+                  ? "truncate text-[12px] font-medium text-slate-500"
+                  : "text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500"
+              }
+            >
+              {compact
+                ? session.department || roleLabels[session.role]
+                : `${roleLabels[session.role]}${session.department ? ` · ${session.department}` : ""}`}
             </p>
             <h2
               className={cx(
-                "truncate font-semibold tracking-tight text-slate-950",
-                compact ? "text-lg sm:text-xl" : "text-xl lg:text-2xl"
+                "truncate font-semibold text-slate-950",
+                compact ? "text-[17px] leading-snug" : "text-xl tracking-tight lg:text-2xl"
               )}
             >
-              {pageTitle ?? session.name}
+              {compact && pageTitle === "Home"
+                ? `Hello, ${session.name.split(" ")[0]}`
+                : (pageTitle ?? session.name)}
             </h2>
-            {pageTitle && (
-              <p className={cx("mt-0.5 truncate text-xs text-slate-500", compact && "hidden sm:block")}>{session.name}</p>
+            {pageTitle && !compact && (
+              <p className="mt-0.5 truncate text-xs text-slate-500">{session.name}</p>
             )}
           </div>
         </div>
@@ -1810,7 +1953,7 @@ function Topbar({
               onClick={onToggleNotifications}
               className={cx(
                 "rounded-xl border border-blue-200 bg-blue-50 font-semibold text-blue-800 transition hover:bg-blue-100",
-                compact ? "px-3 py-2 text-xs sm:text-sm" : "px-4 py-2 text-sm"
+                compact ? "px-3 py-2 text-[13px] sm:text-sm" : "px-4 py-2 text-sm"
               )}
             >
               {notificationCount > 0 ? `${notificationCount} new` : "Alerts"}
@@ -2559,18 +2702,24 @@ function UsersPage() {
     id: string;
     full_name: string;
     role: string;
+    jobTitle?: string | null;
     is_active: boolean;
     email: string;
     departments?: { name: string; subsidiaryName?: string | null } | null;
     subsidiaryName?: string | null;
   }>>([]);
   const [departmentOptions, setDepartmentOptions] = useState<DepartmentRow[]>([]);
+  const [staffWithoutLogin, setStaffWithoutLogin] = useState<
+    Array<{ id: string; fullName: string; jobTitle: string; staffNumber: string; departmentId: string }>
+  >([]);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("general-manager");
   const [subsidiaryId, setSubsidiaryId] = useState("");
   const [departmentId, setDepartmentId] = useState("");
+  const [staffId, setStaffId] = useState("");
+  const [constructionDesk, setConstructionDesk] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [createdLogin, setCreatedLogin] = useState<{ email: string; password: string; fullName: string; role: string } | null>(null);
@@ -2606,10 +2755,12 @@ function UsersPage() {
         role: row.role as string,
         is_active: Boolean(row.is_active),
         email: (row.email as string) || "",
+        jobTitle: (row.jobTitle as string | null) ?? null,
         departments: row.departments ? { name: row.departments.name as string, subsidiaryName: row.departments.subsidiaryName ?? null } : null,
         subsidiaryName: row.subsidiaryName ?? null
       }))
     );
+    setStaffWithoutLogin(listPayload.staffWithoutLogin ?? []);
     setDepartmentOptions(deptRows);
   }
 
@@ -2637,7 +2788,9 @@ function UsersPage() {
           fullName: fullName.trim(),
           role,
           departmentId: role === "department-head" || role === "manager" ? departmentId : null,
-          subsidiaryId: role === "executive-director" ? subsidiaryId : null
+          subsidiaryId: role === "executive-director" ? subsidiaryId : null,
+          staffId: staffId || null,
+          jobTitle: constructionDeskLabel(constructionDesk) || null
         })
       });
       const payload = await response.json();
@@ -2647,7 +2800,9 @@ function UsersPage() {
         email: email.trim(),
         password,
         fullName: fullName.trim(),
-        role: roleLabels[role]
+        role: constructionDeskLabel(constructionDesk)
+          ? `${roleLabels[role]} · ${constructionDeskLabel(constructionDesk)}`
+          : roleLabels[role]
       });
       setFullName("");
       setEmail("");
@@ -2655,6 +2810,8 @@ function UsersPage() {
       setRole("general-manager");
       setSubsidiaryId("");
       setDepartmentId("");
+      setStaffId("");
+      setConstructionDesk("");
       await loadUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create user");
@@ -2703,6 +2860,10 @@ function UsersPage() {
   const headCount = profiles.filter((item) => item.role === "department_head").length;
   const marketingCount = profiles.filter((item) => item.role === "marketing_officer").length;
   const resetTarget = profiles.find((item) => item.id === resetUserId);
+  const selectedDepartment = departmentOptions.find((item) => item.id === departmentId);
+  const constructionLogin =
+    (role === "department-head" || role === "manager") && isConstructionDepartment(selectedDepartment);
+  const linkableStaff = staffWithoutLogin.filter((person) => person.departmentId === departmentId);
 
   return (
     <div className="space-y-6">
@@ -2717,7 +2878,10 @@ function UsersPage() {
         <MetricCard label="Marketing Officers" value={marketingCount.toString()} tone="slate" />
       </MetricGrid>
 
-      <Panel title="Create Login Account" subtitle="Generate email and password for General Manager, Department Head, or Marketing Officer.">
+      <Panel
+        title="Create Login Account"
+        subtitle="Corporation roles stay as they are. For the Taraba team, pick Manager, then Construction, then their desk on the Jalingo road."
+      >
         <form onSubmit={createUser} className="grid gap-4 md:grid-cols-2">
           <label className="block">
             <span className="field-label">Full name</span>
@@ -2726,15 +2890,25 @@ function UsersPage() {
           <label className="block">
             <span className="field-label">Role</span>
             <select value={role} onChange={(event) => setRole(event.target.value as Role)} className="form-control">
-              <option value="general-manager">General Manager</option>
-              <option value="managing-director">Managing Director</option>
-              <option value="executive-director">Executive Director</option>
-              <option value="director-of-administration">Director of Administration</option>
-              <option value="human-resources">Central Human Resources</option>
-              <option value="manager">Manager</option>
-              <option value="department-head">Unit head</option>
-              <option value="marketing-officer">Marketing Officer</option>
+              <optgroup label="Corporation">
+                <option value="general-manager">General Manager</option>
+                <option value="managing-director">Managing Director</option>
+                <option value="executive-director">Executive Director</option>
+                <option value="director-of-administration">Director of Administration</option>
+                <option value="human-resources">Central Human Resources</option>
+              </optgroup>
+              <optgroup label="Department logins — these file reports">
+                <option value="manager">Manager</option>
+                <option value="department-head">Unit head</option>
+              </optgroup>
+              <optgroup label="Marketing">
+                <option value="marketing-officer">Marketing Officer</option>
+              </optgroup>
             </select>
+            <p className="mt-2 text-xs leading-5 text-slate-500">
+              Project Manager, Supervisor, Admin, and Finance and Procurement are desks on a job, not corporation roles.
+              Create them as Manager in Construction.
+            </p>
           </label>
           <label className="block">
             <span className="field-label">Email (login)</span>
@@ -2750,10 +2924,69 @@ function UsersPage() {
                 departments={departmentOptions}
                 subsidiaryId={subsidiaryId}
                 departmentId={departmentId}
-                onSubsidiaryId={setSubsidiaryId}
-                onDepartmentId={setDepartmentId}
+                onSubsidiaryId={(id) => {
+                  setSubsidiaryId(id);
+                  setStaffId("");
+                  setConstructionDesk("");
+                }}
+                onDepartmentId={(id) => {
+                  setDepartmentId(id);
+                  setStaffId("");
+                  setConstructionDesk("");
+                }}
               />
             </div>
+          )}
+          {constructionLogin && (
+            <>
+              {linkableStaff.length > 0 && (
+                <label className="block md:col-span-2">
+                  <span className="field-label">Staff already on the Construction register</span>
+                  <select
+                    value={staffId}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      setStaffId(next);
+                      const person = linkableStaff.find((item) => item.id === next);
+                      if (person) {
+                        setFullName(person.fullName);
+                        setConstructionDesk(deskFromJobTitle(person.jobTitle));
+                      }
+                    }}
+                    className="form-control"
+                  >
+                    <option value="">New login — or pick who this is</option>
+                    {linkableStaff.map((person) => (
+                      <option key={person.id} value={person.id}>
+                        {person.fullName}
+                        {person.staffNumber ? ` · ${person.staffNumber}` : ""}
+                        {person.jobTitle ? ` · ${person.jobTitle}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label className="block md:col-span-2">
+                <span className="field-label">Desk on Jalingo Road Construction</span>
+                <select
+                  value={constructionDesk}
+                  onChange={(event) => setConstructionDesk(event.target.value)}
+                  className="form-control"
+                  required
+                >
+                  <option value="">Select desk</option>
+                  {CONSTRUCTION_DESKS.map((desk) => (
+                    <option key={desk.id} value={desk.id}>
+                      {desk.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  This is what the Executive Director sees on the crew. The login remains Manager, so they can file
+                  reports.
+                </p>
+              </label>
+            </>
           )}
           {role === "executive-director" && (
             <label className="block md:col-span-2">
@@ -2797,6 +3030,7 @@ function UsersPage() {
                     <p className="font-semibold text-slate-950">{profile.full_name}</p>
                     <p className="mt-1 text-sm text-slate-600">
                       {roleFromDbLabel(profile.role)}
+                      {profile.jobTitle ? ` · ${profile.jobTitle}` : ""}
                       {profile.subsidiaryName ? ` · ${profile.subsidiaryName}` : ""}
                       {profile.departments?.subsidiaryName && !profile.subsidiaryName ? ` · ${profile.departments.subsidiaryName}` : ""}
                       {profile.departments?.name ? ` · ${profile.departments.name}` : ""}
@@ -3124,7 +3358,9 @@ function DepartmentHeadPortal({
   submissions,
   onSubmit,
   onReportOpen,
-  onPageChange
+  onPageChange,
+  title,
+  subtitle
 }: {
   activePage: PageId;
   session: Session;
@@ -3132,8 +3368,11 @@ function DepartmentHeadPortal({
   onSubmit: (submission: DepartmentSubmission) => Promise<unknown>;
   onReportOpen: (id: string) => void;
   onPageChange: (page: PageId) => void;
+  title?: string;
+  subtitle?: string;
 }) {
   const department = session.department ?? "Corporate Administration";
+  const constructionDesk = session.departmentCode === "CST" || department === "Construction";
   const finance = reportFinance({ name: department, code: session.departmentCode });
   const blueprint = departmentBlueprints[department] ?? {
     completedLabel: "Jobs Completed Today",
@@ -3181,7 +3420,9 @@ function DepartmentHeadPortal({
   const returnedReports = ownReports.filter((item) => item.status === "Returned");
   const draftReports = ownReports.filter((item) => item.status === "Draft");
   const today = new Date().toISOString().slice(0, 10);
-  const todayReports = ownReports.filter((item) => item.date === today);
+  const todayReports = ownReports.filter(
+    (item) => item.date === today && item.submittedBy === session.name
+  );
   const todayDraft = todayReports.find((item) => item.status === "Draft");
   const todayPending = todayReports.find((item) => item.status === "Pending Chairman Review");
   const todayReturned = todayReports.find((item) => item.status === "Returned");
@@ -3383,8 +3624,10 @@ function DepartmentHeadPortal({
   return (
     <div className="space-y-4 pb-28 lg:space-y-5 lg:pb-0">
       <PageTitle
-        title="Submit today’s report"
-        subtitle="Phone-friendly flow: Brief → Operations → Numbers. Save a draft anytime."
+        title={title ?? "Submit today’s report"}
+        subtitle={
+          subtitle ?? "Phone-friendly flow: Brief → Operations → Numbers. Save a draft anytime."
+        }
       />
 
       <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
@@ -3488,36 +3731,62 @@ function DepartmentHeadPortal({
         {step === 1 && (
           <div className="space-y-4">
             <NarrativeInput
-              label="Department update and current activities *"
+              label={
+                constructionDesk
+                  ? "What happened on the Jalingo road today *"
+                  : "Department update and current activities *"
+              }
               value={form.departmentUpdate}
               onChange={(value) => setForm({ ...form, departmentUpdate: value })}
-              placeholder="Give an update on your department and its current activities."
+              placeholder={
+                constructionDesk
+                  ? "From your desk: progress, materials, attendance, plant, or money — whatever you are responsible for."
+                  : "Give an update on your department and its current activities."
+              }
             />
             <NarrativeInput
-              label="Projects currently being worked on *"
+              label={constructionDesk ? "Progress on this job *" : "Projects currently being worked on *"}
               value={form.currentProjects}
               onChange={(value) => setForm({ ...form, currentProjects: value })}
-              placeholder="List active projects, workstreams, contracts, or operational tasks."
+              placeholder={
+                constructionDesk
+                  ? "Chainage, grading, culvert, laterite, compaction, materials received, or admin work done."
+                  : "List active projects, workstreams, contracts, or operational tasks."
+              }
             />
             <NarrativeInput
-              label="Upcoming projects and plans *"
+              label={constructionDesk ? "Tomorrow’s plan *" : "Upcoming projects and plans *"}
               value={form.upcomingProjects}
               onChange={(value) => setForm({ ...form, upcomingProjects: value })}
-              placeholder="State upcoming projects, plans, timelines, and preparation needs."
+              placeholder={
+                constructionDesk
+                  ? "What the crew or your desk will do next, and what you need ready."
+                  : "State upcoming projects, plans, timelines, and preparation needs."
+              }
             />
             <NarrativeInput
-              label="Growth and development ideas *"
+              label={constructionDesk ? "Recommendations / what would help the job *" : "Growth and development ideas *"}
               value={form.growthIdeas}
               onChange={(value) => setForm({ ...form, growthIdeas: value })}
-              placeholder="Share plans and ideas for the growth and development of your department."
+              placeholder={
+                constructionDesk
+                  ? "Plant, materials, cash, labour, or a decision you need from the Executive Director."
+                  : "Share plans and ideas for the growth and development of your department."
+              }
             />
             <label className="block">
-              <span className="field-label">Challenges / areas where support is needed *</span>
+              <span className="field-label">
+                {constructionDesk ? "Delays, weather, and support needed *" : "Challenges / areas where support is needed *"}
+              </span>
               <textarea
                 value={form.challenges}
                 onChange={(event) => setForm({ ...form, challenges: event.target.value })}
                 className="form-control min-h-28 resize-none"
-                placeholder="State blockers, resource gaps, approval needs, faults, or unresolved operational issues."
+                placeholder={
+                  constructionDesk
+                    ? "Rain, plant down, materials short, security, payment delay, or anything blocking the road."
+                    : "State blockers, resource gaps, approval needs, faults, or unresolved operational issues."
+                }
               />
             </label>
             <button
@@ -3790,13 +4059,13 @@ function PageTitle({ title, subtitle, action }: { title: string; subtitle: strin
   return (
     <div className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:gap-4 sm:rounded-3xl sm:p-6">
       <div className="min-w-0">
-        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-800 sm:text-xs sm:tracking-[0.2em]">
+        <p className="hidden text-[10px] font-bold uppercase tracking-[0.18em] text-blue-800 sm:block sm:text-xs sm:tracking-[0.2em]">
           Tanjuriel Corporation IMS
         </p>
-        <h2 className="mt-1.5 text-xl font-semibold tracking-[-0.03em] text-slate-950 sm:mt-2 sm:text-3xl">
+        <h2 className="text-[17px] font-semibold tracking-tight text-slate-950 sm:mt-2 sm:text-3xl sm:tracking-[-0.03em]">
           {title}
         </h2>
-        <p className="mt-1.5 max-w-4xl text-sm leading-5 text-slate-600 sm:mt-2 sm:leading-6">{subtitle}</p>
+        <p className="mt-1 max-w-4xl text-[14px] leading-5 text-slate-600 sm:mt-2 sm:text-sm sm:leading-6">{subtitle}</p>
       </div>
       {action}
     </div>

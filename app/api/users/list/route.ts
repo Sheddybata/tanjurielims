@@ -31,6 +31,21 @@ export async function GET(request: NextRequest) {
 
     const emailById = new Map((authData.users ?? []).map((user) => [user.id, user.email ?? ""]));
 
+    const profileIds = (profiles ?? []).map((profile: any) => profile.id as string);
+    const [{ data: staffRows }, { data: unlinkedRows }] = await Promise.all([
+      profileIds.length
+        ? admin.from("staff").select("profile_id, job_title").in("profile_id", profileIds)
+        : Promise.resolve({ data: [] as Array<{ profile_id: string; job_title: string | null }> }),
+      admin
+        .from("staff")
+        .select("id, full_name, job_title, staff_number, department_id")
+        .is("profile_id", null)
+        .not("status", "in", "(resigned,retired,dismissed)")
+        .order("full_name")
+        .limit(500)
+    ]);
+    const jobByProfile = new Map((staffRows ?? []).map((row) => [row.profile_id as string, row.job_title as string | null]));
+
     const users = (profiles ?? []).map((profile: any) => {
       const departmentRow = Array.isArray(profile.departments) ? profile.departments[0] : profile.departments;
       const departmentSubsidiary = Array.isArray(departmentRow?.subsidiaries)
@@ -45,6 +60,7 @@ export async function GET(request: NextRequest) {
         id: profile.id as string,
         full_name: profile.full_name as string,
         role: profile.role as string,
+        jobTitle: jobByProfile.get(profile.id as string) || null,
         is_active: Boolean(profile.is_active),
         email: emailById.get(profile.id as string) || "",
         subsidiaryName: (ownSubsidiary as string | undefined) ?? null,
@@ -52,7 +68,16 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    return NextResponse.json({ users });
+    return NextResponse.json({
+      users,
+      staffWithoutLogin: (unlinkedRows ?? []).map((row) => ({
+        id: row.id as string,
+        fullName: row.full_name as string,
+        jobTitle: (row.job_title as string | null) ?? "",
+        staffNumber: (row.staff_number as string | null) ?? "",
+        departmentId: row.department_id as string
+      }))
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     return NextResponse.json({ error: message }, { status: 500 });

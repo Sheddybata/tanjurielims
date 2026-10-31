@@ -1,7 +1,6 @@
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import {
   marketingStatusToDb,
-  priorityToDb,
   statusToDb,
   type UiMarketingStatus,
   type UiPriority,
@@ -36,56 +35,18 @@ export type ReportWriteInput = {
 };
 
 export async function createDailyReport(input: ReportWriteInput) {
-  const supabase = getSupabaseBrowser();
-  const now = new Date().toISOString();
-  const payload: Record<string, unknown> = {
-    display_code: input.displayCode,
-    department_id: input.departmentId,
-    submitted_by: input.submittedBy,
-    parent_report_id: input.parentReportId ?? null,
-    reporting_date: input.reportingDate,
-    status: statusToDb[input.status],
-    priority: priorityToDb[input.priority],
-    revenue: input.revenue,
-    inquiries: input.inquiries,
-    attendance: input.attendance,
-    active_operations: input.activeOperations,
-    cash_in: input.cashIn,
-    expenses: input.expenses,
-    assets_flagged: input.assetsFlagged,
-    jobs_completed: input.jobsCompleted || null,
-    jobs_in_progress: input.jobsInProgress || null,
-    department_update: input.departmentUpdate || null,
-    current_projects: input.currentProjects || null,
-    upcoming_projects: input.upcomingProjects || null,
-    growth_ideas: input.growthIdeas || null,
-    challenges: input.challenges || null,
-    summary: input.summary,
-    funds_destination: input.fundsDestination || null,
-    submitted_at: input.status === "Pending Chairman Review" ? now : null
-  };
-  let { data, error } = await supabase.from("daily_reports").insert(payload).select("id, display_code").single();
-  if (error && /funds_destination/.test(error.message)) {
-    const { funds_destination: _ignored, ...withoutFunds } = payload;
-    const retry = await supabase.from("daily_reports").insert(withoutFunds).select("id, display_code").single();
-    data = retry.data;
-    error = retry.error;
-  }
-  if (error) throw error;
-  if (!data) throw new Error("Failed to save report");
-
-  const labels = (input.equipmentStatus ?? []).filter(Boolean);
-  if (labels.length) {
-    const { error: equipmentError } = await supabase.from("daily_report_equipment_status").insert(
-      labels.map((label) => ({
-        report_id: data.id,
-        equipment_label: label
-      }))
-    );
-    if (equipmentError) throw equipmentError;
-  }
-
-  return data as { id: string; display_code: string };
+  const { data: sessionData } = await getSupabaseBrowser().auth.getSession();
+  const token = sessionData.session?.access_token;
+  if (!token) throw new Error("You must be signed in.");
+  const response = await fetch("/api/reports", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || "Failed to save report");
+  if (!payload.report) throw new Error("Failed to save report");
+  return payload.report as { id: string; display_code: string };
 }
 
 export async function applyReportDecision(input: {

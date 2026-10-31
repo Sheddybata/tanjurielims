@@ -73,9 +73,11 @@ export async function fetchProfile(userId: string): Promise<ProfileRow | null> {
   if (!rich.error) {
     const row = rich.data as any;
     if (!row) return null;
+    const department = Array.isArray(row.departments) ? row.departments[0] : row.departments;
     const subsidiary = Array.isArray(row.subsidiaries) ? row.subsidiaries[0] : row.subsidiaries;
     return {
       ...(row as ProfileRow),
+      departments: department ?? null,
       subsidiaries: subsidiary ?? null
     };
   }

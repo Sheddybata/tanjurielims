@@ -3,6 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase/client";
 import { roleToDb, type UiRole } from "@/lib/ims/mappers";
 import { attachProfileToStaff } from "@/lib/ims/service-server";
+import { isConstructionDepartment } from "@/lib/ims/service";
+import { constructionDeskLabel } from "@/lib/ims/construction-desks";
 
 type CreateUserBody = {
   email: string;
@@ -11,6 +13,8 @@ type CreateUserBody = {
   role: UiRole;
   departmentId?: string | null;
   subsidiaryId?: string | null;
+  staffId?: string | null;
+  jobTitle?: string | null;
 };
 
 export async function POST(request: NextRequest) {
@@ -61,6 +65,21 @@ export async function POST(request: NextRequest) {
     }
 
     const admin = getSupabaseAdmin();
+    const jobTitle = constructionDeskLabel(body.jobTitle) || String(body.jobTitle ?? "").trim();
+    if ((body.role === "department-head" || body.role === "manager") && body.departmentId) {
+      const { data: department } = await admin
+        .from("departments")
+        .select("code, name")
+        .eq("id", body.departmentId)
+        .maybeSingle();
+      if (isConstructionDepartment(department) && !jobTitle) {
+        return NextResponse.json(
+          { error: "Pick the desk on Jalingo Road Construction: Project Manager, Supervisor, Admin, or Finance and Procurement." },
+          { status: 400 }
+        );
+      }
+    }
+
     const { data: created, error: createError } = await admin.auth.admin.createUser({
       email: body.email,
       password: body.password,
@@ -94,13 +113,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: message }, { status: 400 });
     }
 
-    await attachProfileToStaff(admin, created.user.id, [body.email], body.fullName, body.departmentId ?? null);
+    const staffId = String(body.staffId ?? "").trim();
+    if (staffId) {
+      await admin.from("staff").update({ profile_id: created.user.id }).eq("id", staffId).is("profile_id", null);
+    } else {
+      await attachProfileToStaff(admin, created.user.id, [body.email], body.fullName, body.departmentId ?? null);
+    }
+    if (jobTitle) {
+      const { data: linked } = await admin.from("staff").select("id").eq("profile_id", created.user.id).maybeSingle();
+      if (linked?.id) {
+        await admin.from("staff").update({ job_title: jobTitle }).eq("id", linked.id);
+        await admin.from("construction_crew").update({ role_on_site: jobTitle }).eq("staff_id", linked.id).is("left_on", null);
+      }
+    }
 
     return NextResponse.json({
       id: created.user.id,
       email: body.email,
       fullName: body.fullName,
-      role: body.role
+      role: body.role,
+      jobTitle: jobTitle || null
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

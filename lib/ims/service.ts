@@ -36,6 +36,7 @@ export const OPEN_REQUEST_STATUSES: RequestStatus[] = [
 export const MONEY_DEPARTMENT_CODES = ["MCT", "INV", "AUB"];
 export const MONEY_SUBSIDIARY_CODES = ["BIF"];
 export const SUITE_DEPARTMENT_CODES = ["SUI"];
+export const CONSTRUCTION_DEPARTMENT_CODES = ["CST"];
 
 export function generateRequestReference() {
   const stamp = Date.now().toString(36).toUpperCase();
@@ -69,6 +70,32 @@ export function isSuiteDepartment(department?: { code?: string | null; name?: st
   if (!department) return false;
   if (department.code && SUITE_DEPARTMENT_CODES.includes(department.code)) return true;
   return String(department.name ?? "").trim().toLowerCase() === "suite";
+}
+
+export function isConstructionDepartment(department?: { code?: string | null; name?: string | null } | null) {
+  if (!department) return false;
+  if (department.code && CONSTRUCTION_DEPARTMENT_CODES.includes(department.code)) return true;
+  return String(department.name ?? "").trim().toLowerCase() === "construction";
+}
+
+export function isLoanDesk(department?: {
+  code?: string | null;
+  name?: string | null;
+  subsidiaryCode?: string | null;
+  subsidiaryName?: string | null;
+} | null) {
+  if (!department) return false;
+  const code = String(department.code ?? "").trim().toUpperCase();
+  const name = String(department.name ?? "").trim().toLowerCase();
+  if (code === "MCT" || name.includes("microcredit")) return true;
+  if (code === "AUB" || code === "AUA" || name.includes("audit")) return false;
+  return isBankingFinance(department);
+}
+
+export function generateLoanCode() {
+  const stamp = Date.now().toString(36).toUpperCase();
+  const rand = Math.random().toString(36).slice(2, 5).toUpperCase();
+  return `TAN-LN-${stamp}-${rand}`;
 }
 
 export type RequestQuestion = {

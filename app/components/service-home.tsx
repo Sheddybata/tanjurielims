@@ -19,6 +19,8 @@ type HomePage =
   | "Announcements"
   | "Cash Book"
   | "Check-ins"
+  | "Loans"
+  | "Jalingo Road Construction"
   | "Department Reports"
   | "Leave"
   | "Staff Register"
@@ -36,8 +38,12 @@ export function ServiceHome({
   name,
   roleLabel,
   canSubmitReports,
+  fieldPhone = false,
+  reportPage = "Daily Submission",
   showCash,
   showCheckins,
+  showLoans,
+  showSite,
   directoryScope = "department",
   showDepartmentAccounts,
   onOpen,
@@ -46,8 +52,12 @@ export function ServiceHome({
   name: string;
   roleLabel: string;
   canSubmitReports: boolean;
+  fieldPhone?: boolean;
+  reportPage?: HomePage;
   showCash?: boolean;
   showCheckins?: boolean;
+  showLoans?: boolean;
+  showSite?: boolean;
   directoryScope?: "department" | "subsidiary";
   showDepartmentAccounts?: boolean;
   onOpen: (page: HomePage) => void;
@@ -96,9 +106,13 @@ export function ServiceHome({
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-800">{roleLabel}</p>
-          <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-950 sm:mt-2 sm:text-2xl">Hello, {name.split(" ")[0]}</h2>
-          <p className="mt-1 text-sm text-slate-600">
+          <div className={fieldPhone ? "hidden sm:block" : undefined}>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-800">{roleLabel}</p>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-950 sm:mt-2 sm:text-2xl">
+              Hello, {name.split(" ")[0]}
+            </h2>
+          </div>
+          <p className={fieldPhone ? "text-[15px] leading-5 text-slate-600 sm:mt-1 sm:text-sm" : "mt-1 text-sm text-slate-600"}>
             {loading
               ? "Loading your desk…"
               : `${waiting.length ? `${waiting.length} waiting on you.` : "Nothing is waiting on you."} ${
@@ -111,7 +125,7 @@ export function ServiceHome({
             + New request
           </button>
           {canSubmitReports && (
-            <button type="button" className="secondary-button w-full sm:w-auto" onClick={() => onOpen("Daily Submission")}>
+            <button type="button" className="secondary-button w-full sm:w-auto" onClick={() => onOpen(reportPage)}>
               Submit today’s report
             </button>
           )}
@@ -204,6 +218,20 @@ export function ServiceHome({
           <p className="mt-2 font-semibold text-slate-950">My requests</p>
           <p className="mt-1 text-sm text-slate-600">Leave, permission, equipment, IT, and maintenance.</p>
         </button>
+        {showSite && (
+          <button type="button" className="rounded-3xl border border-slate-200 bg-white p-4 text-left hover:border-blue-200" onClick={() => onOpen("Jalingo Road Construction")}>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-800">Construction</p>
+            <p className="mt-2 font-semibold text-slate-950">Jalingo Road Construction</p>
+            <p className="mt-1 text-sm text-slate-600">Crew and daily reports for the Taraba road.</p>
+          </button>
+        )}
+        {showLoans && (
+          <button type="button" className="rounded-3xl border border-slate-200 bg-white p-4 text-left hover:border-blue-200" onClick={() => onOpen("Loans")}>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-800">Counter</p>
+            <p className="mt-2 font-semibold text-slate-950">Loans</p>
+            <p className="mt-1 text-sm text-slate-600">Open a loan or record a payment when the borrower pays at the desk.</p>
+          </button>
+        )}
         {showCash && (
           <button type="button" className="rounded-3xl border border-slate-200 bg-white p-4 text-left hover:border-blue-200" onClick={() => onOpen("Cash Book")}>
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-800">Stewardship</p>

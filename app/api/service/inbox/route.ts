@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
     title: string;
     subtitle: string;
     status: string;
-    page: "Requests" | "Department Reports" | "Leave";
+    page: "Requests" | "Department Reports" | "Leave" | "Jalingo Road Construction";
   }> = [];
 
   if (caller.role === "executive_director") {
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
       const [{ data: reports }, { data: staffRows }] = await Promise.all([
         db
           .from("daily_reports")
-          .select("id, display_code, reporting_date, departments(name)")
+          .select("id, display_code, reporting_date, departments(name, code)")
           .eq("status", "pending_chairman_review")
           .in("department_id", departmentIds)
           .order("reporting_date", { ascending: false })
@@ -54,12 +54,15 @@ export async function GET(request: NextRequest) {
       ]);
       for (const report of reports ?? []) {
         const department = Array.isArray(report.departments) ? report.departments[0] : report.departments;
+        const construction = department?.code === "CST" || department?.name === "Construction";
         desk.push({
           id: `report:${report.id}`,
-          title: `${department?.name ?? "Department"} daily report`,
+          title: construction
+            ? "Jalingo Road Construction report"
+            : `${department?.name ?? "Department"} daily report`,
           subtitle: `${report.display_code ?? "Report"} · ${report.reporting_date}`,
           status: "Pending Executive Director",
-          page: "Department Reports"
+          page: construction ? "Jalingo Road Construction" : "Department Reports"
         });
       }
       const staffIds = (staffRows ?? []).map((row) => row.id as string);
