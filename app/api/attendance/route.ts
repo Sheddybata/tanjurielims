@@ -132,24 +132,20 @@ export async function GET(request: NextRequest) {
   const date = request.nextUrl.searchParams.get("date") || new Date().toISOString().slice(0, 10);
   const importId = request.nextUrl.searchParams.get("importId") || "";
 
-  let { data: importRows } = await db
+  const imported = await db
     .from("attendance_imports")
-    .select("id, file_name, created_at, row_count, matched_count, uploaded_by, profiles:uploaded_by(full_name)")
+    .select("id, file_name, created_at, row_count, matched_count, uploaded_by")
     .eq("department_id", departmentId)
     .order("created_at", { ascending: false })
     .limit(40);
-  if (!importRows) {
-    const retry = await db
-      .from("attendance_imports")
-      .select("id, file_name, created_at, row_count, matched_count, uploaded_by")
-      .eq("department_id", departmentId)
-      .order("created_at", { ascending: false })
-      .limit(40);
-    importRows = retry.data;
-  }
+  const importRows = imported.data ?? [];
+  const uploaderIds = Array.from(new Set(importRows.map((row) => row.uploaded_by).filter(Boolean)));
+  const { data: uploaders } = uploaderIds.length
+    ? await db.from("profiles").select("id, full_name").in("id", uploaderIds)
+    : { data: [] as Array<{ id: string; full_name: string | null }> };
+  const uploaderNames = new Map((uploaders ?? []).map((person) => [person.id, person.full_name]));
 
-  const imports = (importRows ?? []).map((row: any) => {
-    const uploader = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+  const imports = importRows.map((row) => {
     const punchDays = Array.from(new Set(allPunches.filter((item) => item.import_id === row.id).map((item) => String(item.punched_at).slice(0, 10)))).sort();
     return {
       id: row.id,
@@ -157,7 +153,7 @@ export async function GET(request: NextRequest) {
       createdAt: row.created_at,
       rowCount: row.row_count,
       matchedCount: row.matched_count,
-      uploadedBy: uploader?.full_name || null,
+      uploadedBy: (row.uploaded_by && uploaderNames.get(row.uploaded_by)) || null,
       firstDay: punchDays[0] || null,
       lastDay: punchDays[punchDays.length - 1] || null,
       days: punchDays.length
