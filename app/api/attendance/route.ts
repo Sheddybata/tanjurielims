@@ -62,7 +62,7 @@ async function rematchDepartment(
     }
   }
   await Promise.all(
-    [...seen.values()].map(async (row) => {
+    Array.from(seen.values()).map(async (row) => {
       const staffId = matchAttendanceStaff(staff, row.pin, row.name, pinMap);
       if (!staffId || staffId === row.staffId) return;
       await db.from("attendance_punches").update({ staff_id: staffId }).eq("department_id", departmentId).eq("device_pin", row.pin);
@@ -124,7 +124,7 @@ export async function GET(request: NextRequest) {
     }
     dayMap.set(day, bucket);
   }
-  const days = [...dayMap.values()]
+  const days = Array.from(dayMap.values())
     .sort((a, b) => b.date.localeCompare(a.date))
     .map((item) => ({ date: item.date, people: item.people.size, present: item.present }));
 
@@ -150,7 +150,7 @@ export async function GET(request: NextRequest) {
 
   const imports = (importRows ?? []).map((row: any) => {
     const uploader = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-    const punchDays = [...new Set(allPunches.filter((item) => item.import_id === row.id).map((item) => String(item.punched_at).slice(0, 10)))].sort();
+    const punchDays = Array.from(new Set(allPunches.filter((item) => item.import_id === row.id).map((item) => String(item.punched_at).slice(0, 10)))).sort();
     return {
       id: row.id,
       fileName: row.file_name,
@@ -188,7 +188,7 @@ export async function GET(request: NextRequest) {
     list.push(punch);
     byPerson.set(key, list);
   }
-  const roll = [...byPerson.values()]
+  const roll = Array.from(byPerson.values())
     .map((list) => {
       const first = list[0];
       const last = list[list.length - 1];
@@ -334,6 +334,6 @@ export async function POST(request: NextRequest) {
     matched,
     unmatched: payload.length - matched,
     matchedPeople: new Set(payload.filter((row) => row.staff_id).map((row) => row.device_pin)).size,
-    unmatchedPeople: [...unmatchedPeople.values()]
+    unmatchedPeople: Array.from(unmatchedPeople.values())
   });
 }

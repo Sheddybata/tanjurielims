@@ -310,7 +310,7 @@ export type AttendanceSuggestion = {
 };
 
 function uniqueIds(people: AttendanceStaff[]) {
-  const ids = [...new Set(people.map((person) => person.id).filter(Boolean))];
+  const ids = Array.from(new Set(people.map((person) => person.id).filter(Boolean)));
   return ids.length === 1 ? ids[0] : null;
 }
 
@@ -338,7 +338,7 @@ function personTokens(person: AttendanceStaff) {
     expanded.add(token);
     for (const nick of nicknamesOf(token)) expanded.add(nick);
   }
-  return [...expanded];
+  return Array.from(expanded);
 }
 
 function gluedNames(tokens: string[]) {
@@ -350,7 +350,7 @@ function gluedNames(tokens: string[]) {
       glued.add(`${tokens[i]}${tokens[j]}`);
     }
   }
-  return [...glued];
+  return Array.from(glued);
 }
 
 function scoreStaffName(person: AttendanceStaff, punchName: string): { score: number; reason: string } {

@@ -252,7 +252,7 @@ export function ConstructionOffice({
   const todaySpend = todayReports.reduce((sum, item) => sum + (item.expenses ?? 0), 0);
   const todayBilled = todayReports.reduce((sum, item) => sum + (item.revenue ?? 0), 0);
   const todayCollected = todayReports.reduce((sum, item) => sum + (item.cashIn ?? 0), 0);
-  const workToday = [...new Set(todayReports.map((item) => item.jobsCompleted).filter(Boolean))];
+  const workToday = Array.from(new Set(todayReports.map((item) => item.jobsCompleted).filter(Boolean)));
 
   const missingToday = crew.filter((person) => {
     const names = [nameKey(person.fullName), nameKey(person.preferredName)].filter(Boolean);
