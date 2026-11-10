@@ -37,7 +37,10 @@ function nameWords(value?: string | null) {
 export function linkClockToStaff(users: HqClockUser[], staff: HqStaffMatch[], punches: HqClockPunch[]): HqRosterPerson[] {
   const staffByName = new Map<string, HqStaffMatch[]>();
   for (const person of staff) {
-    const keys = new Set([...nameWords(person.preferredName), ...nameWords(person.fullName)]);
+    const keys: string[] = [];
+    for (const key of [...nameWords(person.preferredName), ...nameWords(person.fullName)]) {
+      if (!keys.includes(key)) keys.push(key);
+    }
     for (const key of keys) {
       const group = staffByName.get(key) ?? [];
       if (!group.some((item) => item.id === person.id)) group.push(person);
