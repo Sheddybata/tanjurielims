@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const caller = await requireCaller(request);
   if (!isCaller(caller)) return NextResponse.json({ error: caller.error }, { status: caller.status });
-  if (!["manager", "department_head", "executive_director", "director_of_administration", "general_manager", "chairman"].includes(caller.role)) {
+  if (!["manager", "department_head", "executive_director", "director_of_administration", "general_manager"].includes(caller.role)) {
     return NextResponse.json({ error: "Not allowed to enter cash" }, { status: 403 });
   }
   const body = await request.json();

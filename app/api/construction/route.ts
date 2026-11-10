@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isCaller, requireCaller } from "@/lib/ims/require-user";
 import { admin, resolveCallerScope } from "@/lib/ims/service-server";
 import { isConstructionDepartment, isMissingTableError } from "@/lib/ims/service";
+import { deskFromJobTitle } from "@/lib/ims/construction-desks";
 
 const WRITE_ROLES = new Set([
   "manager",
@@ -51,9 +52,12 @@ export async function GET(request: NextRequest) {
     .eq("department_id", departmentId)
     .order("is_default", { ascending: false })
     .order("created_at", { ascending: false });
+  const { data: myStaff } = await db.from("staff").select("job_title").eq("profile_id", caller.userId).limit(1);
+  const myDesk = deskFromJobTitle(myStaff?.[0]?.job_title);
+
   if (projectError) {
     if (isMissingTableError(projectError)) {
-      return NextResponse.json({ site: true, department, projects: [], crew: [], logs: [], needsMigration: true });
+      return NextResponse.json({ site: true, department, projects: [], crew: [], logs: [], needsMigration: true, myDesk });
     }
     return NextResponse.json({ error: projectError.message }, { status: 400 });
   }
@@ -114,7 +118,8 @@ export async function GET(request: NextRequest) {
     projects: projects ?? [],
     projectId,
     crew,
-    logs
+    logs,
+    myDesk
   });
 }
 

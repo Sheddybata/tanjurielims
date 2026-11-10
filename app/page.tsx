@@ -29,8 +29,10 @@ import { DirectoryOffice } from "@/app/components/directory-office";
 import { AnnouncementsOffice } from "@/app/components/announcements-office";
 import { CashOffice } from "@/app/components/cash-office";
 import { SuiteOffice } from "@/app/components/suite-office";
-import { LoanOffice } from "@/app/components/loan-office";
 import { ConstructionOffice } from "@/app/components/construction-office";
+import { RoadMonitoringForm, RoadMonitoringView } from "@/app/components/road-monitoring-form";
+import type { RoadMonitoringForm as RoadMonitoringData } from "@/lib/ims/road-monitoring";
+import { HqAttendance } from "@/app/components/hq-attendance";
 import { AssetHistory } from "@/app/components/asset-history";
 import { isBankingFinance, isConstructionDepartment, isLoanDesk, isSuiteDepartment } from "@/lib/ims/service";
 import { CONSTRUCTION_DESKS, constructionDeskLabel, deskFromJobTitle } from "@/lib/ims/construction-desks";
@@ -79,7 +81,8 @@ type PageId =
   | "Leave"
   | "Letters"
   | "Admin Dashboard"
-  | "Directorate KPIs";
+  | "Directorate KPIs"
+  | "HQ Attendance";
 
 type Session = {
   role: Role;
@@ -118,6 +121,7 @@ type DepartmentSubmission = {
   challenges?: string;
   fundsDestination?: string;
   summary: string;
+  roadMonitoring?: RoadMonitoringData | null;
   status: SubmissionStatus;
   priority: "Normal" | "Attention" | "Critical";
   parentReportId?: string | null;
@@ -270,6 +274,7 @@ function isServiceLanePage(page: PageId) {
 const rolePages: Record<Role, PageId[]> = {
   chairman: [
     "Home",
+    "HQ Attendance",
     "Executive Dashboard",
     "Approval Queue",
     "Department Reports",
@@ -278,16 +283,13 @@ const rolePages: Record<Role, PageId[]> = {
     "Announcements",
     "Cash Book",
     "Check-ins",
-    "Loans",
     "Jalingo Road Construction",
     "Staff Register",
-    "Staff Applications",
     "Leave",
-    "Letters",
     "Assets",
     "Users"
   ],
-  "managing-director": ["Home", "Requests", "Directory", "Announcements", "Staff Register", "Staff Applications", "Leave", "Letters"],
+  "managing-director": ["Home", "HQ Attendance", "Requests", "Directory", "Announcements", "Staff Register", "Staff Applications", "Leave", "Letters"],
   "executive-director": [
     "Home",
     "Operations Overview",
@@ -301,7 +303,6 @@ const rolePages: Record<Role, PageId[]> = {
     "Announcements",
     "Cash Book",
     "Check-ins",
-    "Loans",
     "Jalingo Road Construction",
     "Staff Register",
     "Leave",
@@ -309,6 +310,7 @@ const rolePages: Record<Role, PageId[]> = {
   ],
   "general-manager": [
     "Home",
+    "HQ Attendance",
     "Operations Overview",
     "Department Compliance",
     "Exceptions",
@@ -318,7 +320,6 @@ const rolePages: Record<Role, PageId[]> = {
     "Announcements",
     "Cash Book",
     "Check-ins",
-    "Loans",
     "Jalingo Road Construction",
     "Staff Register",
     "Staff Applications",
@@ -327,6 +328,7 @@ const rolePages: Record<Role, PageId[]> = {
   ],
   "director-of-administration": [
     "Home",
+    "HQ Attendance",
     "Admin Dashboard",
     "Directorate KPIs",
     "Requests",
@@ -334,7 +336,6 @@ const rolePages: Record<Role, PageId[]> = {
     "Announcements",
     "Cash Book",
     "Check-ins",
-    "Loans",
     "Jalingo Road Construction",
     "Staff Register",
     "Staff Applications",
@@ -342,7 +343,7 @@ const rolePages: Record<Role, PageId[]> = {
     "Letters",
     "Users"
   ],
-  "human-resources": ["Home", "Requests", "Directory", "Announcements", "Staff Register", "Staff Applications", "Leave", "Letters"],
+  "human-resources": ["Home", "HQ Attendance", "Requests", "Directory", "Announcements", "Staff Register", "Staff Applications", "Leave", "Letters"],
   "department-head": [
     "Home",
     "Requests",
@@ -353,7 +354,6 @@ const rolePages: Record<Role, PageId[]> = {
     "Announcements",
     "Cash Book",
     "Check-ins",
-    "Loans",
     "Jalingo Road Construction",
     "Assets",
     "Directorate KPIs"
@@ -368,7 +368,6 @@ const rolePages: Record<Role, PageId[]> = {
     "Announcements",
     "Cash Book",
     "Check-ins",
-    "Loans",
     "Jalingo Road Construction",
     "Assets",
     "Directorate KPIs"
@@ -403,8 +402,8 @@ function compactNavItems(session: Session, department?: DepartmentRow | null): P
     const desk = stewardshipDepartment(session, department);
     if (isSuiteDepartment(desk)) return ["Home", "Requests", "Check-ins", "Directory", "My Reports"];
     if (isConstructionDepartment(desk)) return ["Home", "Requests", "Jalingo Road Construction", "Directory", "My Reports"];
-    if (isLoanDesk(desk) && isBankingFinance(desk)) return ["Home", "Requests", "Loans", "Cash Book", "My Reports"];
-    if (isLoanDesk(desk)) return ["Home", "Requests", "Loans", "Directory", "My Reports"];
+    if (isLoanDesk(desk) && isBankingFinance(desk)) return ["Home", "Requests", "Cash Book", "My Reports"];
+    if (isLoanDesk(desk)) return ["Home", "Requests", "Directory", "My Reports"];
     if (isBankingFinance(desk)) return ["Home", "Requests", "Cash Book", "Directory", "My Reports"];
     return ["Home", "Requests", "Daily Submission", "Directory", "My Reports"];
   }
@@ -1222,6 +1221,7 @@ export default function Home() {
                 showCheckins={suiteRelevant}
                 showLoans={loanRelevant}
                 showSite={siteRelevant}
+                canCreateRequest={session.role !== "chairman"}
                 directoryScope={session.role === "executive-director" ? "subsidiary" : "department"}
                 showDepartmentAccounts={session.role === "executive-director"}
                 onOpen={(page) => goToPage(page)}
@@ -1233,25 +1233,28 @@ export default function Home() {
             )}
             {activePage === "Requests" && (
               <RequestsOffice
-                startNew={requestStartNew}
+                startNew={requestStartNew && session.role !== "chairman"}
+                canCreate={session.role !== "chairman"}
                 canRequestForTeam={session.role === "manager" || session.role === "department-head"}
               />
             )}
             {activePage === "Directory" && <DirectoryOffice />}
             {activePage === "Announcements" && <AnnouncementsOffice />}
             {activePage === "Cash Book" && (
-              <CashOffice departments={stewardshipDepartments} departmentId={session.departmentId} />
-            )}
-            {activePage === "Check-ins" && (
-              <SuiteOffice departments={stewardshipDepartments} departmentId={session.departmentId} />
-            )}
-            {activePage === "Loans" && (
-              <LoanOffice
+              <CashOffice
                 departments={stewardshipDepartments}
                 departmentId={session.departmentId}
-                canWrite={session.role === "manager" || session.role === "department-head" || session.role === "executive-director"}
+                canRecord={session.role !== "chairman"}
               />
             )}
+            {activePage === "Check-ins" && (
+              <SuiteOffice
+                departments={stewardshipDepartments}
+                departmentId={session.departmentId}
+                canRecord={session.role !== "chairman"}
+              />
+            )}
+            {activePage === "HQ Attendance" && <HqAttendance />}
             {activePage === "Jalingo Road Construction" && (
               <ConstructionOffice
                 departments={stewardshipDepartments}
@@ -1282,6 +1285,22 @@ export default function Home() {
                     expenses: item.expenses
                   }))}
                 canReview={session.role === "executive-director"}
+                projectManagerForm={
+                  writesDepartmentReports(session.role) ? (
+                    <RoadMonitoringForm
+                      preparedBy={session.name}
+                      reports={submissions}
+                      onOpenReport={setSelectedReportId}
+                      onSubmit={async (draft) => {
+                        await addSubmission({
+                          department: session.department ?? "Construction",
+                          submittedBy: session.name,
+                          ...draft
+                        });
+                      }}
+                    />
+                  ) : null
+                }
                 onOpenReport={setSelectedReportId}
                 onApprove={async (id) => {
                   try {
@@ -1414,6 +1433,7 @@ export default function Home() {
               activePage !== "Leave" &&
               activePage !== "Letters" &&
               activePage !== "Directorate KPIs" &&
+              activePage !== "HQ Attendance" &&
               !(session.role === "executive-director" && activePage === "Department Reports") && (
               <GeneralManagerDashboard
                 activePage={activePage}
@@ -2074,6 +2094,7 @@ function ReportOverview({
         </div>
       </div>
 
+      {report.roadMonitoring ? null : (
       <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-5">
         {finance.showBilled && (
           <PositionTile label={finance.billedLabel} value={formatNaira(report.revenue)} tone="green" />
@@ -2085,9 +2106,21 @@ function ReportOverview({
         <PositionTile label="Operations" value={report.activeOperations.toString()} tone="slate" />
         <PositionTile label="Asset Alerts" value={report.assetsFlagged.toString()} tone={report.assetsFlagged ? "red" : "green"} />
       </div>
+      )}
 
       <div className="mt-6 space-y-6">
-        <Panel title="Operational Narrative" subtitle="Full department report details for review before action.">
+        <Panel
+          title={report.roadMonitoring ? report.roadMonitoring.roadName || "Road monitoring" : "Operational Narrative"}
+          subtitle={
+            report.roadMonitoring
+              ? "One road, one day. Labour, plant, fuel, and materials on this form belong to this road only."
+              : "Full department report details for review before action."
+          }
+        >
+          {report.roadMonitoring ? (
+            <RoadMonitoringView form={report.roadMonitoring} />
+          ) : (
+          <>
           <dl className="grid gap-4 text-sm md:grid-cols-2 xl:grid-cols-3">
             <ReportDetail label="Inquiries" value={report.inquiries?.toString() ?? "Not supplied"} />
             <ReportDetail label="Attendance" value={report.attendance?.toString() ?? "Not supplied"} />
@@ -2107,6 +2140,8 @@ function ReportOverview({
             <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Narrative summary</p>
             <p className="mt-3 max-w-5xl text-sm leading-7 text-slate-700">{report.summary}</p>
           </div>
+          </>
+          )}
           {canExecutiveAct && (
             <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50 p-4">
               <p className="text-sm font-semibold text-blue-950">Executive Director decision</p>
@@ -2191,6 +2226,72 @@ function ReportOverview({
         )}
       </div>
     </section>
+  );
+}
+
+function ChairmanGlance({
+  submissions,
+  departmentRows
+}: {
+  submissions: DepartmentSubmission[];
+  departmentRows: DepartmentRow[];
+}) {
+  const filed = submissions.filter((item) => item.status !== "Draft");
+  const pending = filed.filter((item) => item.status === "Pending Chairman Review").length;
+  const approved = filed.filter((item) => item.status === "Approved").length;
+  const returned = filed.filter((item) => item.status === "Returned").length;
+  const statusBars = [
+    { label: "Waiting on an Executive Director", value: pending, color: "bg-amber-500" },
+    { label: "Approved", value: approved, color: "bg-emerald-600" },
+    { label: "Returned", value: returned, color: "bg-rose-500" }
+  ];
+  const statusMax = Math.max(1, ...statusBars.map((item) => item.value));
+  const groups = groupBySubsidiary(departmentRows).map((group) => {
+    const reported = group.departments.filter((department) =>
+      filed.some((item) => item.department === department.name && (!item.subsidiary || item.subsidiary === group.name))
+    ).length;
+    return { name: group.name.replace(/^Tanjuriel\s+/i, ""), reported, total: group.departments.length };
+  });
+
+  return (
+    <Panel title="Corporation at a glance" subtitle="How many desks have filed, and where those reports sit.">
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Report status</p>
+          <div className="mt-3 space-y-3">
+            {statusBars.map((item) => (
+              <div key={item.label}>
+                <div className="mb-1 flex items-center justify-between text-sm">
+                  <span className="text-slate-700">{item.label}</span>
+                  <span className="font-semibold tabular-nums text-slate-950">{item.value}</span>
+                </div>
+                <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+                  <div className={`h-full rounded-full ${item.color}`} style={{ width: `${(item.value / statusMax) * 100}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Departments that filed, by subsidiary</p>
+          <div className="mt-3 space-y-3">
+            {groups.map((item) => (
+              <div key={item.name}>
+                <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                  <span className="truncate text-slate-700">{item.name}</span>
+                  <span className="shrink-0 font-semibold tabular-nums text-slate-950">
+                    {item.reported}/{item.total}
+                  </span>
+                </div>
+                <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-full rounded-full bg-blue-700" style={{ width: `${item.total ? (item.reported / item.total) * 100 : 0}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Panel>
   );
 }
 
@@ -2283,6 +2384,8 @@ function ChairmanDashboard({
         <MetricCard label="Billed across departments" value={formatNaira(metrics.totalRevenue)} tone="green" />
         <MetricCard label="Asset / Equipment Alerts" value={metrics.alerts.toString()} tone="red" />
       </MetricGrid>
+
+      <ChairmanGlance submissions={submissions} departmentRows={departmentRows} />
 
       <Panel title="Executive Position Infographics" subtitle="High-level position so the Chairman can follow every report through Executive Director review.">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

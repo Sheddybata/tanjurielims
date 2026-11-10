@@ -17,6 +17,7 @@ export function AnnouncementsOffice() {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [audience, setAudience] = useState("corp");
+  const [subsidiaries, setSubsidiaries] = useState<Array<{ id: string; name: string }> | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -28,6 +29,7 @@ export function AnnouncementsOffice() {
     if (!response.ok) throw new Error(payload.error || "Failed to load announcements");
     setRows(payload.announcements ?? []);
     setCanWrite(Boolean(payload.canWrite));
+    setSubsidiaries(Array.isArray(payload.subsidiaries) ? payload.subsidiaries : null);
   }
 
   useEffect(() => {
@@ -46,7 +48,12 @@ export function AnnouncementsOffice() {
       const response = await fetch("/api/announcements", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ title, body, audience })
+        body: JSON.stringify({
+          title,
+          body,
+          audience: audience.startsWith("sub:") ? "subsidiary" : audience,
+          subsidiaryId: audience.startsWith("sub:") ? audience.slice(4) : undefined
+        })
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Publish failed");
@@ -71,10 +78,18 @@ export function AnnouncementsOffice() {
         <form onSubmit={publish} className="space-y-3 rounded-3xl border border-slate-200 bg-white p-5">
           <input className="form-control" placeholder="Title" required value={title} onChange={(event) => setTitle(event.target.value)} />
           <textarea className="form-control min-h-28" placeholder="Notice" required value={body} onChange={(event) => setBody(event.target.value)} />
-          <select className="form-control max-w-xs" value={audience} onChange={(event) => setAudience(event.target.value)}>
+          <select className="form-control max-w-md" value={audience} onChange={(event) => setAudience(event.target.value)}>
             <option value="corp">Whole corporation</option>
-            <option value="subsidiary">My subsidiary</option>
-            <option value="department">My department</option>
+            {subsidiaries
+              ? subsidiaries.map((item) => (
+                  <option key={item.id} value={`sub:${item.id}`}>
+                    {item.name}
+                  </option>
+                ))
+              : [
+                  <option key="subsidiary" value="subsidiary">My subsidiary</option>,
+                  <option key="department" value="department">My department</option>
+                ]}
           </select>
           <button type="submit" disabled={busy} className="primary-button disabled:opacity-60">
             {busy ? "Publishing..." : "Publish"}
@@ -87,7 +102,13 @@ export function AnnouncementsOffice() {
         <div className="space-y-3">
           {rows.map((item) => (
             <article key={item.id} className="rounded-3xl border border-slate-200 bg-white p-5">
-              <p className="text-xs font-bold uppercase tracking-wide text-blue-800">{item.audience}</p>
+              <p className="text-xs font-bold uppercase tracking-wide text-blue-800">
+                {item.audience === "corp"
+                  ? "Whole corporation"
+                  : item.audience === "subsidiary"
+                    ? (Array.isArray(item.subsidiaries) ? item.subsidiaries[0]?.name : item.subsidiaries?.name) || "Subsidiary"
+                    : "Department"}
+              </p>
               <h3 className="mt-1 text-lg font-semibold text-slate-950">{item.title}</h3>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.body}</p>
               <p className="mt-3 text-xs text-slate-500">{new Date(item.created_at).toLocaleString("en-GB")}</p>

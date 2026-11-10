@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
 import { ListLoader } from "@/app/components/list-loader";
+import { downloadStaffSheet } from "@/lib/ims/staff-sheet";
 
 type StaffPerson = {
   id: string;
@@ -100,6 +101,7 @@ export function AdminDashboard({
   const [kpis, setKpis] = useState<KpiBrief[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const today = new Date();
   const weekStart = isoDate(mondayOf(today));
   const todayIso = isoDate(today);
@@ -157,6 +159,18 @@ export function AdminDashboard({
   const subsidiaryNames = Array.from(new Set(weekReports.map((report) => report.subsidiary || report.department)));
   const currentKpis = kpis.filter((kpi) => kpi.period_start <= todayIso && kpi.period_end >= todayIso);
 
+  async function exportStaffList(people: StaffPerson[]) {
+    setExporting(true);
+    setError("");
+    try {
+      await downloadStaffSheet(people);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not prepare the staff list");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   function kpiLine(kpi: KpiBrief) {
     const subsidiary = Array.isArray(kpi.subsidiaries) ? kpi.subsidiaries[0]?.name : kpi.subsidiaries?.name;
     const department = Array.isArray(kpi.departments) ? kpi.departments[0]?.name : kpi.departments?.name;
@@ -180,6 +194,12 @@ export function AdminDashboard({
       ) : (
       <>
       <Section title="People" subtitle="Headcount and movement since Monday.">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-slate-600">{active.length} staff on the register.</p>
+          <button type="button" className="secondary-button" disabled={exporting || !active.length} onClick={() => void exportStaffList(active)}>
+            {exporting ? "Preparing PDF…" : "Export staff list"}
+          </button>
+        </div>
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <Count label="Total staff" value={String(active.length)} onClick={() => onOpen("Staff Register")} />
           <Count label="New staff" value={String(starters.length)} onClick={() => onOpen("Staff Register")} />

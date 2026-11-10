@@ -44,6 +44,7 @@ export function ServiceHome({
   showCheckins,
   showLoans,
   showSite,
+  canCreateRequest = true,
   directoryScope = "department",
   showDepartmentAccounts,
   onOpen,
@@ -58,6 +59,7 @@ export function ServiceHome({
   showCheckins?: boolean;
   showLoans?: boolean;
   showSite?: boolean;
+  canCreateRequest?: boolean;
   directoryScope?: "department" | "subsidiary";
   showDepartmentAccounts?: boolean;
   onOpen: (page: HomePage) => void;
@@ -121,9 +123,11 @@ export function ServiceHome({
           </p>
         </div>
         <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
-          <button type="button" className="primary-button w-full sm:w-auto" onClick={onNewRequest}>
-            + New request
-          </button>
+          {canCreateRequest && (
+            <button type="button" className="primary-button w-full sm:w-auto" onClick={onNewRequest}>
+              + New request
+            </button>
+          )}
           {canSubmitReports && (
             <button type="button" className="secondary-button w-full sm:w-auto" onClick={() => onOpen(reportPage)}>
               Submit today’s report

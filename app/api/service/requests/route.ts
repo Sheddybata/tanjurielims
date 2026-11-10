@@ -33,7 +33,9 @@ export async function GET(request: NextRequest) {
   const db = admin();
 
   let query = db.from("service_requests").select(SELECT).order("created_at", { ascending: false });
-  if (scope === "waiting") query = query.eq("waiting_on_id", caller.userId);
+  if (scope === "all") {
+    if (caller.role !== "chairman") return NextResponse.json({ error: "You cannot view every request" }, { status: 403 });
+  } else if (scope === "waiting") query = query.eq("waiting_on_id", caller.userId);
   else if (scope === "assigned") query = query.eq("assigned_to_id", caller.userId);
   else if (scope === "mine") query = query.eq("requester_id", caller.userId);
 
@@ -48,6 +50,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const caller = await requireCaller(request);
   if (!isCaller(caller)) return NextResponse.json({ error: caller.error }, { status: caller.status });
+  if (caller.role === "chairman") return NextResponse.json({ error: "The Chairman reviews requests and does not file one" }, { status: 403 });
 
   try {
     const body = await request.json();

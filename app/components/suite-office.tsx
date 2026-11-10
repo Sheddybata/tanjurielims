@@ -19,10 +19,12 @@ function naira(value: number) {
 
 export function SuiteOffice({
   departments,
-  departmentId
+  departmentId,
+  canRecord = true
 }: {
   departments: DepartmentRow[];
   departmentId?: string;
+  canRecord?: boolean;
 }) {
   const suiteDepartments = departments.filter((item) => isSuiteDepartment(item));
   const [chosen, setChosen] = useState(
@@ -121,7 +123,9 @@ export function SuiteOffice({
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-800">Stewardship</p>
         <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Check-ins</h2>
         <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          Record which suite a guest checked into and how much was paid. This is not the Banking and Finance cash book.
+          {canRecord
+            ? "Record which suite a guest checked into and how much was paid. This is not the Banking and Finance cash book."
+            : "Guest check-ins recorded by the suite desk. The Chairman can read them and does not record one."}
         </p>
       </div>
       {needsMigration && (
@@ -144,7 +148,7 @@ export function SuiteOffice({
       {!suite && <p className="text-sm text-slate-600">This login is not a Suite desk.</p>}
       {suite && (
         <>
-          <form onSubmit={save} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-4 sm:p-5 md:grid-cols-2">
+          {canRecord && <form onSubmit={save} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-4 sm:p-5 md:grid-cols-2">
             <label className="block">
               <span className="field-label">Guest name</span>
               <input className="form-control" required value={form.guestName} onChange={(event) => setForm({ ...form, guestName: event.target.value })} />
@@ -178,7 +182,7 @@ export function SuiteOffice({
                 {busy ? "Saving..." : "Record check-in"}
               </button>
             </div>
-          </form>
+          </form>}
           {loading ? (
             <ListLoader label="Loading check-ins…" />
           ) : (

@@ -19,10 +19,12 @@ function naira(value: number) {
 
 export function CashOffice({
   departments,
-  departmentId
+  departmentId,
+  canRecord = true
 }: {
   departments: DepartmentRow[];
   departmentId?: string;
+  canRecord?: boolean;
 }) {
   const moneyDepartments = departments.filter((item) => isBankingFinance(item));
   const [chosen, setChosen] = useState(departmentId && moneyDepartments.some((item) => item.id === departmentId) ? departmentId : moneyDepartments[0]?.id ?? "");
@@ -98,7 +100,9 @@ export function CashOffice({
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-800">Stewardship</p>
         <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Cash book</h2>
         <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          Banking and Finance cash trail for this login. Not a full ledger. Other departments bank with their own Executive Director. Daily reports still carry the pulse figures.
+          {canRecord
+            ? "Banking and Finance cash trail for this login. Not a full ledger. Other departments bank with their own Executive Director. Daily reports still carry the pulse figures."
+            : "Movements recorded by Banking and Finance. The Chairman can read them and does not enter one."}
         </p>
       </div>
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
@@ -115,7 +119,7 @@ export function CashOffice({
       {!money && <p className="text-sm text-slate-600">Cash book is only for Banking and Finance logins.</p>}
       {money && (
         <>
-          <form onSubmit={save} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 md:grid-cols-3">
+          {canRecord && <form onSubmit={save} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-5 md:grid-cols-3">
             <label className="block">
               <span className="field-label">Date</span>
               <input type="date" className="form-control" required value={form.entryDate} onChange={(event) => setForm({ ...form, entryDate: event.target.value })} />
@@ -145,7 +149,7 @@ export function CashOffice({
                 {busy ? "Saving..." : "Record movement"}
               </button>
             </div>
-          </form>
+          </form>}
           {loading ? (
             <ListLoader label="Loading cash book…" variant="table" />
           ) : (

@@ -136,7 +136,9 @@ export function ConstructionOffice({
   reports = [],
   canReview = false,
   canSubmit = false,
+  myDesk = "",
   children,
+  projectManagerForm,
   onOpenReport,
   onApprove,
   onReturn
@@ -146,7 +148,9 @@ export function ConstructionOffice({
   reports?: ConstructionDeskReport[];
   canReview?: boolean;
   canSubmit?: boolean;
+  myDesk?: string;
   children?: ReactNode;
+  projectManagerForm?: ReactNode;
   onOpenReport?: (id: string) => void;
   onApprove?: (id: string) => void;
   onReturn?: (id: string) => void;
@@ -172,6 +176,7 @@ export function ConstructionOffice({
   const [attendanceImports, setAttendanceImports] = useState<AttendanceImport[]>([]);
   const [attendanceBusy, setAttendanceBusy] = useState(false);
   const [attendanceNotice, setAttendanceNotice] = useState("");
+  const [desk, setDesk] = useState(myDesk);
 
   useEffect(() => {
     if (!chosen && constructionDepartments[0]?.id) setChosen(constructionDepartments[0].id);
@@ -199,6 +204,7 @@ export function ConstructionOffice({
     setProjects(payload.projects ?? []);
     setProjectId(payload.projectId ?? payload.projects?.[0]?.id ?? "");
     setCrew(payload.crew ?? []);
+    if (payload.myDesk) setDesk(payload.myDesk);
   }
 
   async function loadAttendance(id: string, date?: string) {
@@ -665,7 +671,9 @@ export function ConstructionOffice({
             />
           )}
 
-          {tab === "file" && canSubmit && <div className="pt-1">{children}</div>}
+          {tab === "file" && canSubmit && (
+            <div className="pt-1">{desk === "project_manager" && projectManagerForm ? projectManagerForm : children}</div>
+          )}
         </>
       )}
     </div>

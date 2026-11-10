@@ -7,6 +7,7 @@ import { clampLeaveEndDate, leaveDateWindow, leaveRules, type LeaveCode } from "
 import { groupBySubsidiary, SubsidiaryDepartmentFields } from "@/app/components/org-select";
 import { matchesIdentity, type SharedIdGroup } from "@/lib/ims/identity";
 import { ListLoader } from "@/app/components/list-loader";
+import { downloadStaffSheet } from "@/lib/ims/staff-sheet";
 
 type PeoplePage = "Staff Register" | "Staff Applications" | "Leave" | "Letters";
 
@@ -268,6 +269,7 @@ function StaffRegister({
   onError: (message: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"serving" | "all" | "left">("all");
@@ -416,6 +418,21 @@ function StaffRegister({
               {showAdd ? "Hide add form" : "Add staff"}
             </button>
           )}
+          <button
+            type="button"
+            className="primary-button"
+            disabled={exporting || !staff.length}
+            onClick={() => {
+              const serving = staff.filter((person) => !leftService.has(person.status));
+              setExporting(true);
+              onError("");
+              downloadStaffSheet(serving)
+                .catch((err) => onError(err instanceof Error ? err.message : "Could not prepare the staff list"))
+                .finally(() => setExporting(false));
+            }}
+          >
+            {exporting ? "Preparing PDF…" : "Export staff list"}
+          </button>
         </div>
       </div>
       <p className="text-sm text-slate-500">

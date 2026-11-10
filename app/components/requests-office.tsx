@@ -50,10 +50,12 @@ const ANSWER_LABELS: Record<string, string> = {
 
 export function RequestsOffice({
   startNew,
-  canRequestForTeam
+  canRequestForTeam,
+  canCreate = true
 }: {
   startNew?: boolean;
   canRequestForTeam?: boolean;
+  canCreate?: boolean;
 }) {
   const [tab, setTab] = useState<"waiting" | "mine">("waiting");
   const [composing, setComposing] = useState(Boolean(startNew));
@@ -82,14 +84,15 @@ export function RequestsOffice({
     const headers = await authHeaders();
     const [catRes, waitRes, mineRes, teamRes] = await Promise.all([
       fetch("/api/service/categories", { headers }),
-      fetch("/api/service/requests?scope=waiting", { headers }),
-      fetch("/api/service/requests?scope=mine", { headers }),
+      fetch(`/api/service/requests?scope=${canCreate ? "waiting" : "all"}`, { headers }),
+      canCreate ? fetch("/api/service/requests?scope=mine", { headers }) : Promise.resolve(null),
       canRequestForTeam ? fetch("/api/directory", { headers }) : Promise.resolve(null)
     ]);
     const cats = await catRes.json();
     const waits = await waitRes.json();
-    const mines = await mineRes.json();
+    const mines = mineRes ? await mineRes.json() : { requests: [] };
     if (!catRes.ok) throw new Error(cats.error || "Failed to load request types");
+    if (!waitRes.ok) throw new Error(waits.error || "Failed to load requests");
     setCategories(cats.categories ?? []);
     setWaiting(waits.requests ?? []);
     setMine(mines.requests ?? []);
@@ -105,7 +108,7 @@ export function RequestsOffice({
     load()
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
       .finally(() => setLoading(false));
-  }, [canRequestForTeam]);
+  }, [canCreate, canRequestForTeam]);
 
   useEffect(() => {
     if (startNew) setComposing(true);
@@ -201,9 +204,11 @@ export function RequestsOffice({
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-800">Service</p>
         <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Requests</h2>
         <p className="mt-2 text-sm text-slate-600">
-          {canRequestForTeam
-            ? "Raise leave, permission, equipment, maintenance, or IT for yourself or for staff in your department."
-            : "Raise leave, permission, equipment, maintenance, or IT."}
+          {canCreate
+            ? canRequestForTeam
+              ? "Raise leave, permission, equipment, maintenance, or IT for yourself or for staff in your department."
+              : "Raise leave, permission, equipment, maintenance, or IT."
+            : "Every request in the corporation. The Chairman reviews them here and does not file one."}
         </p>
       </div>
       {needsMigration && (
@@ -214,6 +219,7 @@ export function RequestsOffice({
       {error && !composing && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
       {notice && <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">{notice}</div>}
 
+      {canCreate && (
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-2">
           {(
@@ -243,17 +249,18 @@ export function RequestsOffice({
           + New
         </button>
       </div>
+      )}
 
       {loading ? (
         <ListLoader label="Loading requests…" />
       ) : (
         <RequestList
-          rows={tab === "waiting" ? waiting : mine}
+          rows={canCreate && tab === "mine" ? mine : waiting}
           onOpen={(id) => openRequest(id).catch((err) => setError(err instanceof Error ? err.message : "Failed"))}
         />
       )}
 
-      {composing && (
+      {canCreate && composing && (
         <div
           className="fixed inset-0 z-[60] flex items-stretch justify-center bg-slate-950/45 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6"
           onClick={() => {
