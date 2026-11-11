@@ -30,7 +30,9 @@ import { AnnouncementsOffice } from "@/app/components/announcements-office";
 import { CashOffice } from "@/app/components/cash-office";
 import { SuiteOffice } from "@/app/components/suite-office";
 import { ConstructionOffice } from "@/app/components/construction-office";
+import { FinanceReportForm, FinanceReportView } from "@/app/components/finance-report-form";
 import { RoadMonitoringForm, RoadMonitoringView } from "@/app/components/road-monitoring-form";
+import type { FinanceReportForm as FinanceReportData } from "@/lib/ims/finance-report";
 import type { RoadMonitoringForm as RoadMonitoringData } from "@/lib/ims/road-monitoring";
 import { HqAttendance } from "@/app/components/hq-attendance";
 import { AssetHistory } from "@/app/components/asset-history";
@@ -122,6 +124,7 @@ type DepartmentSubmission = {
   fundsDestination?: string;
   summary: string;
   roadMonitoring?: RoadMonitoringData | null;
+  financeReport?: FinanceReportData | null;
   status: SubmissionStatus;
   priority: "Normal" | "Attention" | "Critical";
   parentReportId?: string | null;
@@ -1301,6 +1304,22 @@ export default function Home() {
                     />
                   ) : null
                 }
+                financeForm={
+                  writesDepartmentReports(session.role) ? (
+                    <FinanceReportForm
+                      preparedBy={session.name}
+                      reports={submissions}
+                      onOpenReport={setSelectedReportId}
+                      onSubmit={async (draft) => {
+                        await addSubmission({
+                          department: session.department ?? "Construction",
+                          submittedBy: session.name,
+                          ...draft
+                        });
+                      }}
+                    />
+                  ) : null
+                }
                 onOpenReport={setSelectedReportId}
                 onApprove={async (id) => {
                   try {
@@ -2094,7 +2113,7 @@ function ReportOverview({
         </div>
       </div>
 
-      {report.roadMonitoring ? null : (
+      {report.roadMonitoring || report.financeReport ? null : (
       <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-5">
         {finance.showBilled && (
           <PositionTile label={finance.billedLabel} value={formatNaira(report.revenue)} tone="green" />
@@ -2110,14 +2129,24 @@ function ReportOverview({
 
       <div className="mt-6 space-y-6">
         <Panel
-          title={report.roadMonitoring ? report.roadMonitoring.roadName || "Road monitoring" : "Operational Narrative"}
+          title={
+            report.financeReport
+              ? "Financial report"
+              : report.roadMonitoring
+                ? report.roadMonitoring.roadName || "Road monitoring"
+                : "Operational Narrative"
+          }
           subtitle={
-            report.roadMonitoring
-              ? "One road, one day. Labour, plant, fuel, and materials on this form belong to this road only."
-              : "Full department report details for review before action."
+            report.financeReport
+              ? "Period account for Finance and Procurement. Transfers between the company's own accounts are not expenses."
+              : report.roadMonitoring
+                ? "One road, one day. Labour, plant, fuel, and materials on this form belong to this road only."
+                : "Full department report details for review before action."
           }
         >
-          {report.roadMonitoring ? (
+          {report.financeReport ? (
+            <FinanceReportView form={report.financeReport} />
+          ) : report.roadMonitoring ? (
             <RoadMonitoringView form={report.roadMonitoring} />
           ) : (
           <>

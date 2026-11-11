@@ -10,6 +10,7 @@ import {
   type DbRole,
   type UiRole
 } from "@/lib/ims/mappers";
+import { splitFinanceReport } from "@/lib/ims/finance-report";
 import { splitRoadMonitoring } from "@/lib/ims/road-monitoring";
 
 export type ProfileRow = {
@@ -201,8 +202,11 @@ export async function fetchDailyReports() {
     challenges: row.challenges ?? undefined,
     fundsDestination: row.funds_destination ?? undefined,
     ...(() => {
-      const split = splitRoadMonitoring(String(row.summary ?? ""));
-      return { summary: split.text, roadMonitoring: split.form };
+      const summary = String(row.summary ?? "");
+      const finance = splitFinanceReport(summary);
+      if (finance.form) return { summary: finance.text, financeReport: finance.form, roadMonitoring: null };
+      const road = splitRoadMonitoring(summary);
+      return { summary: road.text, financeReport: null, roadMonitoring: road.form };
     })(),
     status: statusFromDb[row.status as DbReportStatus],
     priority: priorityFromDb[row.priority as DbReportPriority]

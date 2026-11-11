@@ -139,6 +139,7 @@ export function ConstructionOffice({
   myDesk = "",
   children,
   projectManagerForm,
+  financeForm,
   onOpenReport,
   onApprove,
   onReturn
@@ -151,6 +152,7 @@ export function ConstructionOffice({
   myDesk?: string;
   children?: ReactNode;
   projectManagerForm?: ReactNode;
+  financeForm?: ReactNode;
   onOpenReport?: (id: string) => void;
   onApprove?: (id: string) => void;
   onReturn?: (id: string) => void;
@@ -672,7 +674,13 @@ export function ConstructionOffice({
           )}
 
           {tab === "file" && canSubmit && (
-            <div className="pt-1">{desk === "project_manager" && projectManagerForm ? projectManagerForm : children}</div>
+            <div className="pt-1">
+              {desk === "finance_procurement" && financeForm
+                ? financeForm
+                : desk === "project_manager" && projectManagerForm
+                  ? projectManagerForm
+                  : children}
+            </div>
           )}
         </>
       )}
